@@ -1,0 +1,7 @@
+Iran Stock Screener - source release archive
+Archive date: 2026-11-16
+Cloudflare production version: fa94145d-1294-43d6-b97b-45af2966ddc9
+Production URL: https://iran-stock-screener.ar-nikzad09.workers.dev/
+Includes the five-minute visible-tab screener refresh and stale-data warning handling.
+This is a source archive; generated build output and node_modules are intentionally excluded.
+Local secrets, work backups, temporary diagnostics, and local tooling artifacts are excluded.

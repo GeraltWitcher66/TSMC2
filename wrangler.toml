@@ -1,0 +1,21 @@
+name = "iran-stock-screener"
+main = "./worker/index.ts"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat", "enable_weak_ref"]
+
+# Store a bounded sample of invocation outcomes and CPU time so future
+# intermittent edge 1xxx / 503 errors can be diagnosed from actual evidence.
+# No request bodies, auth headers or full upstream error pages are logged by
+# the application. Sampling avoids collecting every normal invocation.
+[observability]
+enabled = true
+
+  [observability.logs]
+  enabled = true
+  invocation_logs = true
+  head_sampling_rate = 0.25
+
+# Assets: serve static files from the build output
+[assets]
+directory = "./dist"
+binding = "ASSETS"

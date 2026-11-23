@@ -1,0 +1,14 @@
+{
+  "name": "iran-stock-screener-static",
+  "version": "1.0.0",
+  "private": true,
+  "description": "نسخه استاتیک فیلتر بورس ایران برای انتشار روی GitHub Pages",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node serve.mjs",
+    "test": "node build.mjs && node --import ../tests/register-typescript.mjs --test tests/filters.test.mjs tests/output.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

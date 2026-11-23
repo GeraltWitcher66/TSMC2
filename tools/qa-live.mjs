@@ -1,0 +1,16 @@
+import { POST as screener } from "../app/api/screener/route.ts";
+import { POST as holders } from "../app/api/holder-increases/route.ts";
+import { GET as allHolders } from "../app/api/holder-increases/route.ts";
+import { POST as highlights } from "../app/api/market-highlights/route.ts";
+const response = await screener(new Request("http://localhost/api/screener", { method: "POST", body: JSON.stringify({ symbols: ["کسرام", "کفپارس"] }) }));
+const data = await response.json();
+console.log(JSON.stringify({ api: "screener", http: response.status, latestDate: data.latestDate, rows: data.rows?.map((row) => ({ symbol: row.symbol, date: row.three?.currentDate, close: row.three?.currentPrice, status: row.status, note: row.note })), error: data.error }));
+const holdingResponse = await holders(new Request("http://localhost/api/holder-increases", { method: "POST", body: JSON.stringify({ view: "rows", symbols: ["کسرام", "کفپارس"] }) }));
+const holdingData = await holdingResponse.json();
+console.log(JSON.stringify({ api: "holder-increases", http: holdingResponse.status, sourceDate: holdingData.sourceDate, rows: holdingData.rows?.length, fallback: holdingData.fallback ?? false, partial: holdingData.partial, warning: holdingData.warning, error: holdingData.error }));
+const rankingResponse = await highlights(new Request("http://localhost/api/market-highlights", { method: "POST", body: JSON.stringify({ symbols: ["کسرام", "کفپارس"] }) }));
+const rankingData = await rankingResponse.json();
+console.log(JSON.stringify({ api: "market-highlights", http: rankingResponse.status, latestDate: rankingData.latestDate, partial: rankingData.partial, rows: rankingData.rows?.map((row) => ({ symbol: row.symbol, close: row.priceClose, last: row.priceLast, gap: row.lastCloseGapPct, date: row.sessionDate, clientType: row.clientTypeAvailable })), error: rankingData.error }));
+const marketResponse = await allHolders(new Request("http://localhost/api/holder-increases"));
+const marketData = await marketResponse.json();
+console.log(JSON.stringify({ api: "whole-market-first-page", http: marketResponse.status, date: marketData.sourceDate, rows: marketData.rows?.length, nextCursor: marketData.nextCursor, partial: marketData.partial, fallback: marketData.fallback ?? false, sample: marketData.rows?.slice(0, 2), error: marketData.error }));

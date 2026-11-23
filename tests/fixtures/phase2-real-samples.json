@@ -1,0 +1,571 @@
+{
+  "origin": "Real TSETMC responses retrieved 2026-10-09, selected symbols only; never application fallback data",
+  "session": 20261007,
+  "changes": {
+    "dates": [
+      20261004,
+      20261005,
+      20261006,
+      20261007,
+      20261010
+    ],
+    "shareHoldersChanges": [
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "30765727085936322",
+            "name": "جام‌دارو",
+            "firstDay": 26560001,
+            "secondDay": 26555101,
+            "thirdDay": 26504001,
+            "fourthDay": 26405001,
+            "fifthDay": 26366001
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "30765727085936322",
+            "name": "جام‌دارو",
+            "firstDay": 107128301,
+            "secondDay": 107128301,
+            "thirdDay": 107128301,
+            "fourthDay": 107128301,
+            "fifthDay": 107448508
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "30765727085936322",
+            "name": "جام‌دارو",
+            "firstDay": 32310032,
+            "secondDay": 32310032,
+            "thirdDay": 32310032,
+            "fourthDay": 32310032,
+            "fifthDay": 32400032
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "30765727085936322",
+            "name": "جام‌دارو",
+            "firstDay": 18000000,
+            "secondDay": 18200000,
+            "thirdDay": 19400000,
+            "fourthDay": 20000000,
+            "fifthDay": 20600000
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "30765727085936322",
+            "name": "جام‌دارو",
+            "firstDay": 15793022,
+            "secondDay": 15793022,
+            "thirdDay": 15793022,
+            "fourthDay": 15793022,
+            "fifthDay": 14743022
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "19471788163911687",
+            "name": "فرآورده‌هاي‌ نسوز پارس‌",
+            "firstDay": 40397982,
+            "secondDay": 46871754,
+            "thirdDay": 47471754,
+            "fourthDay": 47471754,
+            "fifthDay": 47771754
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "20560887114747719",
+            "name": "پارس‌ سرام‌",
+            "firstDay": 27654640,
+            "secondDay": 27654640,
+            "thirdDay": 27654640,
+            "fourthDay": 28729816,
+            "fifthDay": 29429816
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "20560887114747719",
+            "name": "پارس‌ سرام‌",
+            "firstDay": 11842355,
+            "secondDay": 11833539,
+            "thirdDay": 11583539,
+            "fourthDay": 11583539,
+            "fifthDay": 11433539
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "27276541005386425",
+            "name": "پارس فنر",
+            "firstDay": 92644688,
+            "secondDay": 92644688,
+            "thirdDay": 92644688,
+            "fourthDay": 92644688,
+            "fifthDay": 92718585
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "27276541005386425",
+            "name": "پارس فنر",
+            "firstDay": 88573918,
+            "secondDay": 88573918,
+            "thirdDay": 88573918,
+            "fourthDay": 88573918,
+            "fifthDay": 89341153
+          }
+        ]
+      },
+      {
+        "name": "شخص حقيقي",
+        "insList": [
+          {
+            "insCode": "64842837716888827",
+            "name": "سايپا ديزل",
+            "firstDay": 3000302668,
+            "secondDay": 3000302668,
+            "thirdDay": 3000302668,
+            "fourthDay": 3000302668,
+            "fifthDay": 2450302668
+          }
+        ]
+      }
+    ]
+  },
+  "samples": [
+    {
+      "symbol": "فجام",
+      "code": "30765727085936322",
+      "quote": {
+        "closingPriceInfo": {
+          "instrumentState": {
+            "idn": 0,
+            "dEven": 0,
+            "hEven": 0,
+            "insCode": null,
+            "lVal18AFC": null,
+            "lVal30": null,
+            "cEtaval": "A ",
+            "realHeven": 0,
+            "underSupervision": 0,
+            "cEtavalTitle": "مجاز"
+          },
+          "instrument": null,
+          "lastHEven": 122952,
+          "finalLastDate": 20261007,
+          "nvt": 0,
+          "mop": 0,
+          "pRedTran": 0,
+          "thirtyDayClosingHistory": null,
+          "priceChange": 0,
+          "priceMin": 19290,
+          "priceMax": 20280,
+          "priceYesterday": 19870,
+          "priceFirst": 20280,
+          "last": true,
+          "id": 0,
+          "insCode": "0",
+          "dEven": 20261007,
+          "hEven": 122952,
+          "pClosing": 19670,
+          "iClose": false,
+          "yClose": false,
+          "pDrCotVal": 20050,
+          "zTotTran": 559,
+          "qTotTran5J": 6595937,
+          "qTotCap": 129755771760
+        }
+      },
+      "client": {
+        "clientType": {
+          "recDate": 20261007,
+          "insCode": "30765727085936322",
+          "buy_I_Volume": 5850065,
+          "buy_N_Volume": 745872,
+          "buy_I_Value": 115272166320,
+          "buy_N_Value": 14483605440,
+          "buy_N_Count": 2,
+          "sell_I_Volume": 6532761,
+          "buy_I_Count": 165,
+          "sell_N_Volume": 63176,
+          "sell_I_Value": 128500393760,
+          "sell_N_Value": 1255378000,
+          "sell_N_Count": 2,
+          "sell_I_Count": 117
+        }
+      },
+      "floor": {
+        "staticThreshold": [
+          {
+            "insCode": "0",
+            "dEven": 20261006,
+            "hEven": 1,
+            "psGelStaMax": 19900,
+            "psGelStaMin": 18760
+          },
+          {
+            "insCode": "0",
+            "dEven": 20261007,
+            "hEven": 60125,
+            "psGelStaMax": 20460,
+            "psGelStaMin": 19280
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "فنر",
+      "code": "27276541005386425",
+      "quote": {
+        "closingPriceInfo": {
+          "instrumentState": {
+            "idn": 0,
+            "dEven": 0,
+            "hEven": 0,
+            "insCode": null,
+            "lVal18AFC": null,
+            "lVal30": null,
+            "cEtaval": "A ",
+            "realHeven": 0,
+            "underSupervision": 0,
+            "cEtavalTitle": "مجاز"
+          },
+          "instrument": null,
+          "lastHEven": 122954,
+          "finalLastDate": 20261007,
+          "nvt": 0,
+          "mop": 0,
+          "pRedTran": 0,
+          "thirtyDayClosingHistory": null,
+          "priceChange": 0,
+          "priceMin": 8720,
+          "priceMax": 9200,
+          "priceYesterday": 8980,
+          "priceFirst": 9050,
+          "last": true,
+          "id": 0,
+          "insCode": "0",
+          "dEven": 20261007,
+          "hEven": 122954,
+          "pClosing": 8860,
+          "iClose": false,
+          "yClose": false,
+          "pDrCotVal": 8720,
+          "zTotTran": 1176,
+          "qTotTran5J": 24970077,
+          "qTotCap": 221328551960
+        }
+      },
+      "client": {
+        "clientType": {
+          "recDate": 20261007,
+          "insCode": "27276541005386425",
+          "buy_I_Volume": 20170077,
+          "buy_N_Volume": 4800000,
+          "buy_I_Value": 178923680540,
+          "buy_N_Value": 42404871420,
+          "buy_N_Count": 2,
+          "sell_I_Volume": 24970077,
+          "buy_I_Count": 325,
+          "sell_N_Volume": 0,
+          "sell_I_Value": 221328551960,
+          "sell_N_Value": 0,
+          "sell_N_Count": 0,
+          "sell_I_Count": 376
+        }
+      },
+      "floor": {
+        "staticThreshold": [
+          {
+            "insCode": "0",
+            "dEven": 20261006,
+            "hEven": 1,
+            "psGelStaMax": 8990,
+            "psGelStaMin": 8470
+          },
+          {
+            "insCode": "0",
+            "dEven": 20261007,
+            "hEven": 60124,
+            "psGelStaMax": 9240,
+            "psGelStaMin": 8720
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "خکاوه",
+      "code": "64842837716888827",
+      "quote": {
+        "closingPriceInfo": {
+          "instrumentState": {
+            "idn": 0,
+            "dEven": 0,
+            "hEven": 0,
+            "insCode": null,
+            "lVal18AFC": null,
+            "lVal30": null,
+            "cEtaval": "A ",
+            "realHeven": 0,
+            "underSupervision": 0,
+            "cEtavalTitle": "مجاز"
+          },
+          "instrument": null,
+          "lastHEven": 122954,
+          "finalLastDate": 20261007,
+          "nvt": 0,
+          "mop": 0,
+          "pRedTran": 0,
+          "thirtyDayClosingHistory": null,
+          "priceChange": 0,
+          "priceMin": 877,
+          "priceMax": 909,
+          "priceYesterday": 884,
+          "priceFirst": 906,
+          "last": true,
+          "id": 0,
+          "insCode": "0",
+          "dEven": 20261007,
+          "hEven": 122954,
+          "pClosing": 901,
+          "iClose": false,
+          "yClose": false,
+          "pDrCotVal": 901,
+          "zTotTran": 2032,
+          "qTotTran5J": 732695017,
+          "qTotCap": 660456141292
+        }
+      },
+      "client": {
+        "clientType": {
+          "recDate": 20261007,
+          "insCode": "64842837716888827",
+          "buy_I_Volume": 720545017,
+          "buy_N_Volume": 12150000,
+          "buy_I_Value": 649562391292,
+          "buy_N_Value": 10893750000,
+          "buy_N_Count": 2,
+          "sell_I_Volume": 699871239,
+          "buy_I_Count": 645,
+          "sell_N_Volume": 32823778,
+          "sell_I_Value": 630715935170,
+          "sell_N_Value": 29740206122,
+          "sell_N_Count": 4,
+          "sell_I_Count": 421
+        }
+      },
+      "floor": {
+        "staticThreshold": [
+          {
+            "insCode": "0",
+            "dEven": 20261006,
+            "hEven": 1,
+            "psGelStaMax": 884,
+            "psGelStaMin": 834
+          },
+          {
+            "insCode": "0",
+            "dEven": 20261007,
+            "hEven": 60125,
+            "psGelStaMax": 910,
+            "psGelStaMin": 858
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "کفپارس",
+      "code": "19471788163911687",
+      "quote": {
+        "closingPriceInfo": {
+          "instrumentState": {
+            "idn": 0,
+            "dEven": 0,
+            "hEven": 0,
+            "insCode": null,
+            "lVal18AFC": null,
+            "lVal30": null,
+            "cEtaval": "A ",
+            "realHeven": 0,
+            "underSupervision": 0,
+            "cEtavalTitle": "مجاز"
+          },
+          "instrument": null,
+          "lastHEven": 122820,
+          "finalLastDate": 20261007,
+          "nvt": 0,
+          "mop": 0,
+          "pRedTran": 0,
+          "thirtyDayClosingHistory": null,
+          "priceChange": 0,
+          "priceMin": 7080,
+          "priceMax": 7080,
+          "priceYesterday": 6880,
+          "priceFirst": 7080,
+          "last": true,
+          "id": 0,
+          "insCode": "0",
+          "dEven": 20261007,
+          "hEven": 122820,
+          "pClosing": 7080,
+          "iClose": false,
+          "yClose": false,
+          "pDrCotVal": 7080,
+          "zTotTran": 128,
+          "qTotTran5J": 1755334,
+          "qTotCap": 12427764720
+        }
+      },
+      "client": {
+        "clientType": {
+          "recDate": 20261007,
+          "insCode": "19471788163911687",
+          "buy_I_Volume": 1755334,
+          "buy_N_Volume": 0,
+          "buy_I_Value": 12427764720,
+          "buy_N_Value": 0,
+          "buy_N_Count": 0,
+          "sell_I_Volume": 1755334,
+          "buy_I_Count": 7,
+          "sell_N_Volume": 0,
+          "sell_I_Value": 12427764720,
+          "sell_N_Value": 0,
+          "sell_N_Count": 0,
+          "sell_I_Count": 115
+        }
+      },
+      "floor": {
+        "staticThreshold": [
+          {
+            "insCode": "0",
+            "dEven": 20261006,
+            "hEven": 1,
+            "psGelStaMax": 6880,
+            "psGelStaMin": 6480
+          },
+          {
+            "insCode": "0",
+            "dEven": 20261007,
+            "hEven": 60125,
+            "psGelStaMax": 7080,
+            "psGelStaMin": 6680
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "کسرام",
+      "code": "20560887114747719",
+      "quote": {
+        "closingPriceInfo": {
+          "instrumentState": {
+            "idn": 0,
+            "dEven": 0,
+            "hEven": 0,
+            "insCode": null,
+            "lVal18AFC": null,
+            "lVal30": null,
+            "cEtaval": "A ",
+            "realHeven": 0,
+            "underSupervision": 0,
+            "cEtavalTitle": "مجاز"
+          },
+          "instrument": null,
+          "lastHEven": 122955,
+          "finalLastDate": 20261007,
+          "nvt": 0,
+          "mop": 0,
+          "pRedTran": 0,
+          "thirtyDayClosingHistory": null,
+          "priceChange": 0,
+          "priceMin": 17150,
+          "priceMax": 17390,
+          "priceYesterday": 16890,
+          "priceFirst": 17390,
+          "last": true,
+          "id": 0,
+          "insCode": "0",
+          "dEven": 20261007,
+          "hEven": 122955,
+          "pClosing": 17360,
+          "iClose": false,
+          "yClose": false,
+          "pDrCotVal": 17390,
+          "zTotTran": 366,
+          "qTotTran5J": 6154692,
+          "qTotCap": 106864400240
+        }
+      },
+      "client": {
+        "clientType": {
+          "recDate": 20261007,
+          "insCode": "20560887114747719",
+          "buy_I_Volume": 4699537,
+          "buy_N_Volume": 1455155,
+          "buy_I_Value": 81566560490,
+          "buy_N_Value": 25297839750,
+          "buy_N_Count": 1,
+          "sell_I_Volume": 5612504,
+          "buy_I_Count": 102,
+          "sell_N_Volume": 542188,
+          "sell_I_Value": 97477847430,
+          "sell_N_Value": 9386552810,
+          "sell_N_Count": 1,
+          "sell_I_Count": 109
+        }
+      },
+      "floor": {
+        "staticThreshold": [
+          {
+            "insCode": "0",
+            "dEven": 20261006,
+            "hEven": 1,
+            "psGelStaMax": 16970,
+            "psGelStaMin": 15990
+          },
+          {
+            "insCode": "0",
+            "dEven": 20261007,
+            "hEven": 60125,
+            "psGelStaMax": 17390,
+            "psGelStaMin": 16390
+          }
+        ]
+      }
+    }
+  ]
+}
