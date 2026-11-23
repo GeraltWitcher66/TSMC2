@@ -62,6 +62,7 @@ h2 { margin-bottom: 0; font-size: 21px; font-weight: 800; letter-spacing: -.025e
 .notice > span { color: var(--green); font-size: 9px; }
 .notice .notice-copy { flex: 1; color: inherit; font-size: 12px; }
 .notice progress { width: min(240px, 28vw); height: 7px; overflow: hidden; border: 0; border-radius: 99px; accent-color: var(--green); }
+.refresh-assurance { margin: -6px 0 16px; color: #3c6957; font-size: 11px; font-weight: 700; }
 
 .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
 .summary-grid article { display: grid; gap: 6px; padding: 18px 19px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: 0 8px 24px rgba(21,54,68,.035); }

@@ -14,12 +14,16 @@ import { browserMarket } from "./lib/browser-market";
 import { browserQuotes } from "./lib/browser-quotes";
 import { recoverDatedScreenerBatch } from "./lib/screener-direct-recovery";
 import { preserveVerifiedRows, screenerQuoteSession, summarizeScreenerFreshness } from "./lib/screener-freshness";
-import { markScreenerRowsStale, SCREENER_AUTO_REFRESH_INTERVAL_MS, shouldAutoRefreshScreener } from "./lib/screener-refresh";
+import {
+  markScreenerRowsStale, nextScreenerRefreshAt, screenerNeedsRefresh, screenerPendingVerification, screenerRowsSession,
+  SCREENER_MAX_VERIFICATION_ATTEMPTS, SCREENER_VERIFICATION_RETRY_MS, type ScreenerVerificationState,
+} from "./lib/screener-refresh";
+import { readScreenerCache, writeScreenerCache } from "./lib/screener-cache";
 import { recoverHighlightPrices } from "./lib/highlight-direct-recovery";
 import { preserveDatedHolderRefresh } from "./lib/holder-increase-refresh";
 import { expectedHighlightSession, isThursdayCommodityInstrument, primaryHighlightSession } from "./lib/highlight-session";
 import { acceptMarketUniverse, holderErrorStatus, holderStatus, mergeMarketUniverse, pendingHolderSymbols, releaseProcessingHolders, retainHolderOnFailure, type HolderScanRecord } from "./lib/holder-scan-recovery";
-import { preserveHighlightRows, preferHolderSource, sourceSession } from "./lib/market-session";
+import { lastClosedEquitySession, preserveHighlightRows, preferHolderSource, sourceSession } from "./lib/market-session";
 import { HIGHLIGHT_BATCH_SIZE } from "./lib/official-details";
 import { highlightCoverage, emptyDataMessage } from "./lib/data-coverage";
 import {
@@ -470,6 +474,20 @@ export default function ScreenerClient() {
   const holderCountsRef = useRef<Record<string, number | null>>({});
   const holderCacheFresh = useRef(false);
   const holderMetaRef = useRef<Record<string, HolderRecord>>({});
+  // Automatic verification attempts are counted per source and expected
+  // session, so an open page retries a bounded number of times and then waits
+  // for the next session instead of polling forever.
+  const verificationRef = useRef<Partial<Record<SourceKey, ScreenerVerificationState>>>({});
+  const [verificationState, setVerificationState] = useState<Partial<Record<SourceKey, ScreenerVerificationState>>>({});
+  const recordVerificationAttempt = (src: SourceKey) => {
+    const session = lastClosedEquitySession();
+    const previous = verificationRef.current[src];
+    const next: ScreenerVerificationState = previous && previous.session === session
+      ? { session, attempts: previous.attempts + 1, lastAttemptAt: Date.now() }
+      : { session, attempts: 1, lastAttemptAt: Date.now() };
+    verificationRef.current = { ...verificationRef.current, [src]: next };
+    setVerificationState(verificationRef.current);
+  };
 
   // ══════════════════════════════════════════════════════════════════════════
   // HELPERS for source management
@@ -510,6 +528,17 @@ export default function ScreenerClient() {
       setCustomDraft(cs.join("\n"));
       setSharedFavs(new Set(favs));
       if (savedSrc && ["haghighi", "zarbanana", "custom"].includes(savedSrc)) setActiveSource(savedSrc);
+      // A reload of the same list and session starts from the stored snapshot.
+      for (const [src, list] of [["haghighi", hs], ["zarbanana", zs], ["custom", cs]] as [SourceKey, string[]][]) {
+        const cached = readScreenerCache(window.localStorage, src, list);
+        if (!cached) continue;
+        if (src === "haghighi") setHaghighiRows(cached.rows);
+        else if (src === "zarbanana") setZarbananaRows(cached.rows);
+        else setCustomRows(cached.rows);
+        if (cached.verification) verificationRef.current[src] = cached.verification;
+        setSourceMeta((current) => ({ ...current, [src]: { latestDate: cached.session, updatedAt: new Date(cached.savedAt) } }));
+      }
+      setVerificationState({ ...verificationRef.current });
 
       try {
         const raw = window.localStorage.getItem(K_HOLDERS_CACHE_V2);
@@ -572,30 +601,67 @@ export default function ScreenerClient() {
     if (!hydrated || autoLoaded.current) return;
     autoLoaded.current = true;
     const symbols = getSourceSymbols(activeSource);
-    if (symbols.length) void fetchSourceData(activeSource, symbols);
+    if (!symbols.length) return;
+    const rows = getSourceRows(activeSource);
+    const now = new Date();
+    // The stored snapshot of the same session is shown as-is; the list is read
+    // again only when it is missing, from another session, or still unverified.
+    if (!screenerNeedsRefresh(rows, now, { loadedSession: screenerRowsSession(rows, now), verification: verificationRef.current[activeSource] })) return;
+    void fetchSourceData(activeSource, symbols);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, activeSource, getSourceSymbols]);
+  }, [hydrated, activeSource, getSourceSymbols, getSourceRows]);
 
-  // Keep an open 3m/6m screener current across trading sessions. Refresh only
-  // the selected watchlist, only while the tab is visible, and never overlap
-  // an existing request. The provider's own dated session remains authoritative.
+  // One timer for the next 13:05 Tehran session close. A visibility change is a
+  // second chance to run the same decision when the browser throttled it, so
+  // returning to the tab alone never refetches data that is already final.
   useEffect(() => {
     if (!hydrated || (activeTab !== "3m" && activeTab !== "6m")) return;
-    const refresh = () => {
-      if (!shouldAutoRefreshScreener(activeTab, document.visibilityState === "visible", Boolean(sourceLoading[activeSource]))) return;
-      const symbols = getSourceSymbols(activeSource);
-      if (symbols.length) void fetchSourceData(activeSource, symbols);
+    const src = activeSource;
+    const symbols = getSourceSymbols(src);
+    const attempt = () => {
+      if (document.visibilityState !== "visible" || sourceLoading[src] || !symbols.length) return;
+      const rows = getSourceRows(src);
+      const now = new Date();
+      if (!screenerNeedsRefresh(rows, now, { loadedSession: screenerRowsSession(rows, now), verification: verificationRef.current[src] })) return;
+      void fetchSourceData(src, symbols);
     };
-    const timer = window.setInterval(refresh, SCREENER_AUTO_REFRESH_INTERVAL_MS);
-    document.addEventListener("visibilitychange", refresh);
+    const now = new Date();
+    const rows = getSourceRows(src);
+    const expected = lastClosedEquitySession(now);
+    const state = verificationRef.current[src];
+    let at = nextScreenerRefreshAt(now).getTime();
+    if (rows.length && screenerPendingVerification(rows, expected, now).length &&
+      (!state || state.session !== expected || state.attempts < SCREENER_MAX_VERIFICATION_ATTEMPTS)) {
+      const retryAt = state && state.session === expected ? state.lastAttemptAt + SCREENER_VERIFICATION_RETRY_MS : now.getTime();
+      at = Math.min(at, retryAt);
+    }
+    const timer = window.setTimeout(attempt, Math.max(1_000, at - now.getTime()));
+    document.addEventListener("visibilitychange", attempt);
     return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", refresh);
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", attempt);
     };
-  // fetchSourceData is intentionally invoked from this bounded timer; its
+  // fetchSourceData is reached through the current rows/attempts deps below; its
   // request counter and AbortController already serialize/cancel refreshes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, activeTab, activeSource, sourceLoading, getSourceSymbols]);
+  }, [hydrated, activeTab, activeSource, sourceLoading, haghighiRows, zarbananaRows, customRows, verificationState, getSourceSymbols, getSourceRows]);
+
+  // One snapshot per source, symbol list and session for the next page load.
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = window.setTimeout(() => {
+      for (const [src, list, rows] of [
+        ["haghighi", haghighiSymbols, haghighiRows],
+        ["zarbanana", zarbananaSymbols, zarbananaRows],
+        ["custom", customSymbols, customRows],
+      ] as [SourceKey, string[], ScreenerRow[]][]) {
+        const session = screenerRowsSession(rows);
+        if (!session) continue;
+        writeScreenerCache(window.localStorage, src, list, { session, savedAt: Date.now(), verification: verificationRef.current[src] ?? null, rows });
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, haghighiRows, zarbananaRows, customRows, haghighiSymbols, zarbananaSymbols, customSymbols]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // DATA FETCHING
@@ -638,6 +704,7 @@ export default function ScreenerClient() {
       else setCustomRows([]);
       return;
     }
+    recordVerificationAttempt(src);
     setSourceLoading((current) => ({ ...current, [src]: true }));
     setNotice(`در حال دریافت سابقه قیمت ${faI.format(symbols.length)} نماد ${sourceLabel(src)}…`);
     try {
@@ -1368,6 +1435,11 @@ export default function ScreenerClient() {
 
   // Current source rows (for 3m/6m tabs)
   const currentRows = useMemo(() => getSourceRows(activeSource), [activeSource, getSourceRows]);
+  const activeRowsSession = useMemo(() => screenerRowsSession(currentRows), [currentRows]);
+  // Every row is either confirmed for the expected session or settled by the
+  // source itself, so nothing is left that a network call could improve today.
+  const allRowsConfirmed = currentRows.length > 0 && !loading && !screenerPendingVerification(currentRows, expectedSession).length;
+  const nextSessionWeekday = new Intl.DateTimeFormat("fa-IR", { weekday: "long", timeZone: "Asia/Tehran" }).format(nextScreenerRefreshAt(new Date()));
 
   const enrichedRows = useMemo(() => currentRows.map((row) => ({
     ...row,
@@ -1741,9 +1813,17 @@ export default function ScreenerClient() {
       <nav className="tabs" aria-label="فیلترهای اصلی" style={{ direction: "rtl" }}>
         <button className={activeTab === "3m" ? "active" : ""} onClick={() => setActiveTab("3m")} type="button"><span>۹۰</span> فیلتر ۹۰ روزه</button>
         <button className={activeTab === "6m" ? "active" : ""} onClick={() => setActiveTab("6m")} type="button"><span>۱۸۰</span> فیلتر ۱۸۰ روزه</button>
-        <button className={activeTab === "highlights" ? "active" : ""} onClick={() => { setActiveTab("highlights"); void fetchMarketHighlights(highlightScope, getScopeSymbols(highlightScope)); }} type="button"><span>۵</span> بیشترین‌های فهرست</button>
+        <button className={activeTab === "highlights" ? "active" : ""} onClick={() => {
+          setActiveTab("highlights");
+          // Switching tabs is not a reason to recalculate a ranking that already
+          // belongs to the latest closed session.
+          if (!highlights.length || !highlightSessionDate || highlightSessionDate < lastClosedEquitySession()) void fetchMarketHighlights(highlightScope, getScopeSymbols(highlightScope));
+        }} type="button"><span>۵</span> بیشترین‌های فهرست</button>
         <button className={activeTab === "holders" ? "active" : ""} onClick={() => setActiveTab("holders")} type="button"><span>ح</span> حقیقی‌های عمده کل بازار</button>
-        <button className={activeTab === "holderIncreases" ? "active" : ""} onClick={() => { setActiveTab("holderIncreases"); if (!holderIncreaseRows.length) void fetchHolderIncreases(); }} type="button"><span>خ</span> خرید حقیقی عمده</button>
+        <button className={activeTab === "holderIncreases" ? "active" : ""} onClick={() => {
+          setActiveTab("holderIncreases");
+          if (!holderIncreaseRows.length || !holderIncreaseDate || holderIncreaseDate < lastClosedEquitySession()) void fetchHolderIncreases();
+        }} type="button"><span>خ</span> خرید حقیقی عمده</button>
         <button className={activeTab === "selected" ? "active" : ""} onClick={() => { setActiveTab("selected"); void loadMissingFavorites(); }} type="button">⭐ نمادهای منتخب {sharedFavs.size > 0 && <span className="count-badge tab-count">{faI.format(sharedFavs.size)}</span>}</button>
       </nav>
 
@@ -1751,7 +1831,18 @@ export default function ScreenerClient() {
       {(activeTab === "3m" || activeTab === "6m") && <div className="source-indicator">
         <span className="source-label">فهرست فعال:</span>
         {(["haghighi", "zarbanana", "custom"] as SourceKey[]).map((src) => (
-          <button key={src} className={`source-chip ${activeSource === src ? "active" : ""}`} onClick={() => { setActiveSource(src); persistPreference(K_ACTIVE_SOURCE, src); if (!getSourceRows(src).length) void fetchSourceData(src, getSourceSymbols(src)); }} type="button">
+          <button key={src} className={`source-chip ${activeSource === src ? "active" : ""}`} onClick={() => {
+            setActiveSource(src);
+            persistPreference(K_ACTIVE_SOURCE, src);
+            const symbols = getSourceSymbols(src);
+            if (!symbols.length) return;
+            const rows = getSourceRows(src);
+            const now = new Date();
+            // Another list is fetched on demand, but a stored snapshot of the
+            // expected session is shown without a new request.
+            if (!screenerNeedsRefresh(rows, now, { loadedSession: screenerRowsSession(rows, now), verification: verificationRef.current[src] })) return;
+            void fetchSourceData(src, symbols);
+          }} type="button">
             {sourceLabel(src)} ({faI.format(sourceCount(src))})
           </button>
         ))}
@@ -1762,6 +1853,8 @@ export default function ScreenerClient() {
       </div>}
 
       <div className="notice" role="status"><span aria-hidden="true">●</span><span className="notice-copy">{activeNotice}</span>{activeTab === "holders" && holderScanning && <progress max={holderProgress.total || 1} value={holderProgress.done} />}</div>
+      {(activeTab === "3m" || activeTab === "6m") && allRowsConfirmed && activeRowsSession &&
+        <p className="refresh-assurance" role="status">قیمت‌های پایانی جلسه {fmtDate(activeRowsSession)} تأیید شد؛ بروزرسانی بعدی {nextSessionWeekday} ساعت ۱۳:۰۵</p>}
 
       {/* ── 3m / 6m TABS (data from active source) ── */}
       {(activeTab === "3m" || activeTab === "6m") && <section className="panel">
