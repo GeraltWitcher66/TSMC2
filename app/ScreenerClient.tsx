@@ -13,7 +13,7 @@ import { holderFreshnessText, type HolderDelivery } from "./lib/holder-freshness
 import { browserMarket } from "./lib/browser-market";
 import { browserQuotes } from "./lib/browser-quotes";
 import { recoverDatedScreenerBatch } from "./lib/screener-direct-recovery";
-import { screenerQuoteSession, summarizeScreenerFreshness } from "./lib/screener-freshness";
+import { preserveVerifiedRows, screenerQuoteSession, summarizeScreenerFreshness } from "./lib/screener-freshness";
 import { markScreenerRowsStale, SCREENER_AUTO_REFRESH_INTERVAL_MS, shouldAutoRefreshScreener } from "./lib/screener-refresh";
 import { recoverHighlightPrices } from "./lib/highlight-direct-recovery";
 import { preserveDatedHolderRefresh } from "./lib/holder-increase-refresh";
@@ -607,13 +607,28 @@ export default function ScreenerClient() {
     sourceControllers.current[src] = controller;
     setSourceErrors((current) => ({ ...current, [src]: "" }));
     const previous = new Map(getSourceRows(src).map((row) => [row.symbol, row]));
-    const publish = (rows: ScreenerRow[]) => {
+    // Every officially confirmed row keeps its price across refreshes that only
+    // return unverified base rows for the same expected session.
+    const verifiedRows = new Map<string, ScreenerRow>([...previous.values()]
+      .filter((row) => row.quoteVerified === true)
+      .map((row) => [normalizeSymbol(row.symbol), row] as const));
+    let liveRows: ScreenerRow[] = [];
+    const publish = (incoming: ScreenerRow[]) => {
       if (sourceRequests.current[src] !== requestId || controller.signal.aborted) return;
-      if (src === "haghighi") setHaghighiRows(rows);
-      else if (src === "zarbanana") setZarbananaRows(rows);
-      else setCustomRows(rows);
-      const dates = rows.map((row) => Number(row.priceQuote?.sessionDate ?? row.three?.currentDate ?? 0)).filter(Boolean);
+      liveRows = preserveVerifiedRows(incoming, verifiedRows);
+      if (src === "haghighi") setHaghighiRows(liveRows);
+      else if (src === "zarbanana") setZarbananaRows(liveRows);
+      else setCustomRows(liveRows);
+      const dates = liveRows.map((row) => Number(row.priceQuote?.sessionDate ?? row.three?.currentDate ?? 0)).filter(Boolean);
       if (dates.length) setSourceMeta((current) => ({ ...current, [src]: { latestDate: Math.max(...dates), updatedAt: new Date() } }));
+    };
+    // A row confirmed one at a time is merged into the visible list; a partial
+    // progress snapshot never replaces the other rows.
+    const publishVerified = (updated: ScreenerRow[]) => {
+      if (!liveRows.length) return;
+      const bySymbol = new Map(liveRows.map((row) => [normalizeSymbol(row.symbol), row]));
+      for (const row of updated) if (row.quoteVerified === true) bySymbol.set(normalizeSymbol(row.symbol), row);
+      publish(symbols.flatMap((symbol) => bySymbol.get(normalizeSymbol(symbol)) ?? []));
     };
     if (!symbols.length) {
       setSourceLoading((current) => ({ ...current, [src]: false }));
@@ -736,9 +751,11 @@ export default function ScreenerClient() {
       publish(rows);
       // Official enrichment is optional and has its own finite budget. Base
       // dated data is already visible while it runs.
+      let verificationBudgetExpired = false;
       try {
-        rows = await withDeadline((signal) => browserQuotes.refresh(rows, () => sourceRequests.current[src] === requestId && !signal.aborted, signal), 25_000, controller.signal);
-      } catch { /* Keep dated base rows when official enrichment is unavailable. */ }
+        rows = await withDeadline((signal) => browserQuotes.refresh(rows, () => sourceRequests.current[src] === requestId && !signal.aborted, signal, publishVerified), 25_000, controller.signal);
+      } catch { verificationBudgetExpired = true; /* every row confirmed before the deadline stays published */ }
+      rows = preserveVerifiedRows(rows, verifiedRows);
       if (sourceRequests.current[src] !== requestId) return;
       if (expired || retained || rowBySymbol.size < symbols.length) setSourceErrors((current) => ({ ...current, [src]: "دریافت ناقص ماند؛ داده‌های موجود با تاریخ منبع حفظ شدند. برای تکمیل دوباره تلاش کنید." }));
       else if (edgeRecoveryCount) setSourceErrors((current) => ({ ...current, [src]: `${faI.format(edgeRecoveryCount)} دسته از قیمت‌های تاریخ‌دار از مسیر جایگزین بازیابی شد؛ صحت لحظه‌ای مستقل تأیید نشده است.` }));
@@ -763,6 +780,13 @@ export default function ScreenerClient() {
         : errors ? `قیمت‌ها بروزرسانی شد؛ دریافت اطلاعات ${faI.format(errors)} نماد کامل نشد؛ دلیل هر نماد در وضعیت آن آمده است.`
         : freshness.earlierThanCalendar ? `قیمت پایانی ${faI.format(freshness.earlierThanCalendar)} نماد از آخرین جلسه مورد انتظار تقویمی قدیمی‌تر است؛ ممکن است نماد متوقف بوده یا منبع داده تأخیر داشته باشد.`
         : `اطلاعات ${faI.format(rows.length)} نماد آماده شد.`);
+      // The deadline only bounds the visible wait. Remaining symbols continue
+      // quietly, two at a time, and each confirmed row is published on its own;
+      // a newer request aborts the shared controller and stops this pass.
+      if (verificationBudgetExpired) {
+        const pending = rows.filter((row) => row.quoteVerified !== true && row.insCode && row.analysisInput);
+        if (pending.length) void browserQuotes.refresh(pending, () => sourceRequests.current[src] === requestId && !controller.signal.aborted, controller.signal, publishVerified, { concurrency: 2 }).catch(() => { /* cancelled passes keep each confirmed row */ });
+      }
       void fetchHolderChangeSummaries(rows);
     } catch (err) {
       if (sourceRequests.current[src] !== requestId) return;

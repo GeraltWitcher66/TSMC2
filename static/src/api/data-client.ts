@@ -18,7 +18,11 @@ export function requestData(
   );
 }
 
-/** Official TSETMC paths are read straight from the CDN; mirrors rotate in net.ts. */
+/**
+ * The fallback for a read-only official path: the alternate official host.
+ * There is no same-origin relay in a static build, and the primary host has
+ * already been tried by the caller.
+ */
 export function relayUrl(path: string): string {
-  return `https://cdn.tsetmc.com/api/${path}`;
+  return `https://tsetmc.com/api/${path}`;
 }

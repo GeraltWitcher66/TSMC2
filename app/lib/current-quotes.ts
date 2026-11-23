@@ -8,6 +8,13 @@ const cache = new RequestCoalescer<Record<string, unknown>>(10_000, 400);
 const OFFICIAL_HOSTS = ["cdn.tsetmc.com", "tsetmc.com"] as const;
 const HOST_FAILURE_THRESHOLD = 2;
 const HOST_COOLDOWN_MS = 15_000;
+// A page request must stay a simple CORS request: a User-Agent, Referer or
+// Cache-Control header triggers a preflight that the official hosts refuse.
+const runningInBrowser = typeof window !== "undefined";
+const OFFICIAL_HEADERS: Record<string, string> = runningInBrowser
+  ? { Accept: "application/json" }
+  : { Accept: "application/json", "User-Agent": "Mozilla/5.0", Referer: "https://tsetmc.com/", "Cache-Control": "no-cache" };
+const OFFICIAL_QUOTE_TIMEOUT_MS = runningInBrowser ? 8_000 : 3_500;
 const hostFailures = new Map<string, { count: number; blockedUntil: number }>();
 
 /** A short, per-host circuit breaker. Failure does not prove the quote is zero. */
@@ -48,8 +55,7 @@ export async function datedCurrentQuotes(instruments: Map<string, Record<string,
           if (!hostAvailable(host)) continue;
           try {
             const payload = await upstreamJson(`https://${host}/api/ClosingPrice/GetClosingPriceInfo/${encodeURIComponent(code)}`, {
-              headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0", Referer: "https://tsetmc.com/", "Cache-Control": "no-cache" },
-              timeoutMs: 3_500, observe,
+              headers: OFFICIAL_HEADERS, timeoutMs: OFFICIAL_QUOTE_TIMEOUT_MS, observe,
             });
             const parsed = instrumentFromClosingPrice(payload, code);
             // A syntactically valid but undated/untraded response is not proof

@@ -20,7 +20,8 @@ export function parseOfficialShareChanges(payload: unknown): ShareChange[] {
 
 export function createBrowserQuoteClient(request: typeof fetch = fetch, options: { detailHedgeDelayMs?: number } = {}) {
   // Direct TSETMC first; when the browser's network cannot reach it (VPN exit
-  // blocks, ISP issue), retry through the Worker's read-only relay route.
+  // blocks, ISP issue), retry through the alternate official host that the
+  // data client exposes for this build.
   const json = async (path: string, signal?: AbortSignal, highlightDetail = false) => {
     if (highlightDetail) {
       // A 12s blocked browser request followed by a 15s relay exceeds the
@@ -65,14 +66,23 @@ export function createBrowserQuoteClient(request: typeof fetch = fetch, options:
     if (!relayed.ok) throw new Error("منبع رسمی قیمت پاسخ نداد.");
     return relayed.json();
   };
-  async function refresh(rows: ScreenerRow[], isCurrent: () => boolean = () => true, signal?: AbortSignal) {
+  async function refresh(
+    rows: ScreenerRow[],
+    isCurrent: () => boolean = () => true,
+    signal?: AbortSignal,
+    onProgress?: (rows: ScreenerRow[]) => void,
+    options: { concurrency?: number } = {},
+  ) {
+    const output = [...rows];
     let consecutiveFailures = 0;
-    return mapWithConcurrency(rows, 4, async (row) => {
+    return mapWithConcurrency(rows, options.concurrency ?? 4, async (row, index) => {
       // An earlier official quote was verified *for its own session*, not for
       // every future session. Re-check older rows on a later user refresh.
       const previouslyDated = screenerQuoteSession(row);
       const alreadyVerifiedForCalendar = Boolean(previouslyDated && previouslyDated >= lastClosedEquitySession());
-      if (!isCurrent() || consecutiveFailures >= 4 || !row.insCode || !row.analysisInput ||
+      // Under an outage keep probing later rows instead of abandoning the
+      // whole list, exactly like the highlight detail pass.
+      if (!isCurrent() || (consecutiveFailures >= 4 && index % 12 !== 0) || !row.insCode || !row.analysisInput ||
           (row.quoteVerified && alreadyVerifiedForCalendar && ["positive", "negative", "none"].includes(row.divergenceAnalysis?.status ?? ""))) return row;
       try {
         const code = encodeURIComponent(row.insCode);
@@ -106,6 +116,12 @@ export function createBrowserQuoteClient(request: typeof fetch = fetch, options:
           try { changes = parseOfficialShareChanges(await json(`Instrument/GetInstrumentShareChange/${code}`, signal)); } catch { /* explicit adjustment state remains */ }
           if (!isCurrent()) return row;
           updated = recalculateScreenerRow(row, candles, changes, officialCurrentVerified);
+        }
+        // Publish each confirmed row immediately: a later deadline or a
+        // cancelled request must not discard work that already succeeded.
+        if (isCurrent()) {
+          output[index] = updated;
+          onProgress?.([...output]);
         }
         return updated;
       } catch { consecutiveFailures++; return row; }
