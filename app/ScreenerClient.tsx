@@ -13,7 +13,7 @@ import { holderFreshnessText, type HolderDelivery } from "./lib/holder-freshness
 import { browserMarket } from "./lib/browser-market";
 import { browserQuotes } from "./lib/browser-quotes";
 import { recoverDatedScreenerBatch } from "./lib/screener-direct-recovery";
-import { preserveVerifiedRows, screenerQuoteSession, summarizeScreenerFreshness } from "./lib/screener-freshness";
+import { preserveVerifiedRows, screenerQuoteSession, screenerTradeCounts, summarizeScreenerFreshness } from "./lib/screener-freshness";
 import {
   markScreenerRowsStale, nextScreenerRefreshAt, screenerNeedsRefresh, screenerPendingVerification, screenerRowsSession,
   SCREENER_MAX_VERIFICATION_ATTEMPTS, SCREENER_VERIFICATION_RETRY_MS, type ScreenerVerificationState,
@@ -1439,6 +1439,9 @@ export default function ScreenerClient() {
   // Every row is either confirmed for the expected session or settled by the
   // source itself, so nothing is left that a network call could improve today.
   const allRowsConfirmed = currentRows.length > 0 && !loading && !screenerPendingVerification(currentRows, expectedSession).length;
+  // Traded = the last dated price is the expected session; closed = the last
+  // dated price is an older session, which is what a halted symbol shows.
+  const tradeCounts = useMemo(() => screenerTradeCounts(currentRows, expectedSession), [currentRows, expectedSession]);
   const nextSessionWeekday = new Intl.DateTimeFormat("fa-IR", { weekday: "long", timeZone: "Asia/Tehran" }).format(nextScreenerRefreshAt(new Date()));
 
   const enrichedRows = useMemo(() => currentRows.map((row) => ({
@@ -1698,7 +1701,7 @@ export default function ScreenerClient() {
 
   function renderSummaryGrid() {
     return <section className="summary-grid" aria-label="خلاصه فیلتر">
-      <article><span>نمادهای فهرست {sourceLabel(activeSource)}</span><strong>{faI.format(currentRows.length)}</strong><small>فقط همین نمادها فیلتر می‌شوند</small></article>
+      <article><span>نمادهای فهرست {sourceLabel(activeSource)}</span><strong>{faI.format(currentRows.length)}</strong><small>فقط همین نمادها فیلتر می‌شوند</small><div className="summary-split"><span title="نمادهایی که قیمت پایانی جلسه مورد انتظار را دارند">معامله‌شده <b className="positive">{faI.format(tradeCounts.traded)}</b></span><span title={tradeCounts.undated ? `بسته: آخرین قیمت تاریخ‌دار از جلسه قدیمی‌تر است؛ ${faI.format(tradeCounts.undated)} نماد هنوز قیمت تاریخ‌دار ندارد` : "بسته: آخرین قیمت تاریخ‌دار از جلسه قدیمی‌تر است (بدون معامله در جلسه آخر)"}>بسته <b className="warning-text">{faI.format(tradeCounts.closed)}</b></span></div></article>
       <article><span>بیشترین فاصله از سقف</span><strong className="negative">{drop(biggestDD)}</strong><small>حقیقی عمده آماده: {faI.format(readyHolder)} نماد</small></article>
       <article><span>بازده مثبت دوره</span><strong className="positive">{faI.format(posCount)}</strong><small>قیمت ابتدای دوره تا آخرین پایانی</small></article>
       <article><span>بازده منفی دوره</span><strong className="negative">{faI.format(negCount)}</strong><small>نمادهایی که نسبت به ابتدای دوره افت کرده‌اند</small></article>

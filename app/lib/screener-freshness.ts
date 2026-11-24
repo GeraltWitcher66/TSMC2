@@ -43,6 +43,22 @@ export function preserveVerifiedRows(
   });
 }
 
+/**
+ * Split a list into symbols whose last dated price belongs to the expected
+ * session (traded), symbols whose last dated price is older (closed/halted in
+ * that session) and symbols without any dated quote (unknown, not closed).
+ */
+export function screenerTradeCounts(rows: ScreenerRow[], expectedSession: number, now = new Date()) {
+  let traded = 0, closed = 0, undated = 0;
+  for (const row of rows) {
+    const session = screenerQuoteSession(row, now);
+    if (session === null) undated++;
+    else if (session >= expectedSession) traded++;
+    else closed++;
+  }
+  return { traded, closed, undated };
+}
+
 /** Calendar comparison is a caution, not proof that a halted symbol traded. */
 export function summarizeScreenerFreshness(rows: ScreenerRow[], calendarSession: number, now = new Date()) {
   let dated = 0, earlierThanCalendar = 0, atCalendar = 0;

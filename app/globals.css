@@ -603,6 +603,9 @@ button, input, textarea { -webkit-tap-highlight-color: transparent; }
 .summary-grid span { font-size: 11.5px; letter-spacing: -.015em; }
 .summary-grid strong { font-size: clamp(22px, 2.2vw, 28px); font-variant-numeric: tabular-nums; }
 .summary-grid small { color: #798e99; }
+.summary-split { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 2px; padding-top: 8px; border-top: 1px dashed #dbe6ea; }
+.summary-split > span { display: inline-flex; align-items: baseline; gap: 5px; color: #798e99; font-size: 10.5px; font-weight: 700; }
+.summary-split b { font-size: 13px; font-variant-numeric: tabular-nums; }
 
 .panel {
   border: 1px solid #dce6eb;
