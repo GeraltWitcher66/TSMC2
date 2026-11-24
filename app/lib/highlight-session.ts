@@ -1,13 +1,6 @@
-import { sourceSession } from "./market-session";
+import { isThursdayCommodityInstrument, sourceSession } from "./market-session";
 
-/** Thursday trading applies to commodity instruments, not ordinary shares.
- * Keep this conservative: ambiguous funds are NOT automatically treated as
- * commodity funds. Never fabricate an observed session from this calendar. */
-export function isThursdayCommodityInstrument(name: string) {
-  const normalized = name.replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/\s+/g, " ");
-  return /صندوق/.test(normalized) && /(کالای|کالایی|طلا|نقره)/.test(normalized)
-    || /گواهی\s*سپرده/.test(normalized) && /(کالا|شمش|طلا|نقره|سکه)/.test(normalized);
-}
+export { isThursdayCommodityInstrument };
 
 /** Expected *closed* session for a highlight instrument in Tehran time.
  * Since 1405/07/09 (2026-10-01) some commodity products trade Thursdays.

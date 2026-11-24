@@ -1,5 +1,5 @@
 import { marketHighlightFromInstrument, normalizeSymbol, toApiSymbol, type MarketHighlight } from "./market";
-import { instrumentFromDailyRows, instrumentSession, validHighlightSnapshotSession } from "./market-session";
+import { inferSnapshotSession, instrumentFromDailyRows, instrumentSession, validHighlightSnapshotSession } from "./market-session";
 import { fetchWithTimeout, readApiJson } from "./request-lifecycle";
 import { expectedHighlightSession } from "./highlight-session";
 
@@ -36,11 +36,15 @@ export async function recoverHighlightPrices(
     const raw = initial && typeof initial === "object" && !Array.isArray(initial) ? initial as Record<string, unknown> : {};
     const maxSession = expectedHighlightSession(String(raw.Name ?? raw.name ?? symbol));
     const datedDaily = instrumentFromDailyRows(daily.get(symbol), maxSession);
-    const snapshotDate = validHighlightSnapshotSession(raw, maxSession);
+    const sourceDate = validHighlightSnapshotSession(raw, maxSession);
+    const inferredDate = sourceDate ? null : inferSnapshotSession(raw, daily.get(symbol), maxSession);
+    const snapshotDate = sourceDate ?? inferredDate;
+    const noTradeToday = !instrumentSession(raw) && !snapshotDate && Boolean(datedDaily) && Number(datedDaily!.Date) < maxSession;
     const useDaily = Boolean(datedDaily && (!snapshotDate || Number(datedDaily.Date) >= snapshotDate));
     const quote = useDaily
       ? { ...raw, AllowedMin: null, AllowedMinDate: null, NetRealValue: null, BuyPower: 0, ...datedDaily }
-      : snapshotDate ? raw : { ...raw, Date: null, date: null, DEven: null, dEven: null };
+      : snapshotDate ? (inferredDate ? { ...raw, Date: inferredDate, AllowedMin: null, AllowedMinDate: null, NetRealValue: null, BuyPower: 0 } : raw)
+        : { ...raw, Date: null, date: null, DEven: null, dEven: null };
     if (!instrumentSession(quote)) return [];
     const parsed = marketHighlightFromInstrument({
       ...quote, Symbol: symbol, quoteSource: useDaily ? "zarvan-daily" : "zarvan-instruments",
@@ -48,7 +52,8 @@ export async function recoverHighlightPrices(
     });
     return parsed ? [{ ...parsed, clientTypeAvailable: false, netRealValue: null,
       realBuyValue: null, realSellValue: null, clientTypeDate: null,
-      floorVerified: false, allowedMin: 0, touchedSellQueue: false }] : [];
+      floorVerified: false, allowedMin: 0, touchedSellQueue: false,
+      ...(noTradeToday ? { noTradeToday: true } : {}) }] : [];
   });
   if (!rows.length) throw new Error("داده قیمت تاریخ‌دار معتبر برای این دسته دریافت نشد.");
   return {

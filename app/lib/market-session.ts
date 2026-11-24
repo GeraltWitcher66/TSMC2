@@ -19,6 +19,34 @@ export function sourceDailyNoTrade(raw: unknown): boolean {
     (!Number.isFinite(Number(volume)) || Number(volume) <= 0);
 }
 
+/** Thursday trading applies to commodity instruments, not ordinary shares.
+ * Keep this conservative: ambiguous funds are NOT automatically treated as
+ * commodity funds. Never fabricate an observed session from this calendar. */
+export function isThursdayCommodityInstrument(name: string) {
+  const normalized = name.replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/\s+/g, " ");
+  return /صندوق/.test(normalized) && /(کالای|کالایی|طلا|نقره)/.test(normalized)
+    || /گواهی\s*سپرده/.test(normalized) && /(کالا|شمش|طلا|نقره|سکه)/.test(normalized);
+}
+
+const compactSession = (date: Date) =>
+  date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+
+/** First ordinary trading day after a dated session (Friday weekend, Thursday
+ * only for commodity products since 1405/07/09). */
+function nextTradingSessionAfter(session: number, name: string): number | null {
+  const s = String(session);
+  if (!/^\d{8}$/.test(s)) return null;
+  const day = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}T00:00:00Z`);
+  if (!Number.isFinite(day.getTime())) return null;
+  const commodity = isThursdayCommodityInstrument(name);
+  for (let i = 0; i < 10; i++) {
+    day.setUTCDate(day.getUTCDate() + 1);
+    const weekday = day.getUTCDay();
+    if (weekday !== 5 && (weekday !== 4 || (commodity && compactSession(day) >= 20261001))) return compactSession(day);
+  }
+  return null;
+}
+
 /** A dated daily record must not carry an impossible high/close/low triple.
  * Missing volume is unknown (legacy source), while explicitly zero volume
  * is a known no-trade slot. */
@@ -67,6 +95,31 @@ export function validHighlightSnapshotSession(
   if (low !== null && (!Number.isFinite(low) || low <= 0 || low > close)) return null;
   if (high !== null && (!Number.isFinite(high) || high <= 0 || high < close)) return null;
   return date;
+}
+
+/** Some snapshots quote the completed session without a source Date (only the
+ * previous close, volume, trades and a clock). Infer the session only when
+ * the quoted previous close exactly matches the newest dated daily row and
+ * every quote field is credible; otherwise the date stays unknown. */
+export function inferSnapshotSession(
+  raw?: Record<string, unknown> | null,
+  dailyRows?: unknown,
+  maxSession = lastClosedEquitySession(),
+  now = new Date(),
+): number | null {
+  if (!raw || instrumentSession(raw)) return null;
+  const daily = instrumentFromDailyRows(dailyRows, maxSession, now);
+  if (!daily) return null;
+  const yesterday = Number(raw.PriceYesterday ?? raw.priceYesterday);
+  const volume = Number(raw.Volume ?? raw.volume);
+  const trades = Number(raw.TradeCount ?? raw.tradeCount);
+  const time = Number(raw.Time ?? raw.time);
+  if (!Number.isFinite(yesterday) || yesterday !== Number(daily.PriceClose)) return null;
+  if (![volume, trades, time].every((value) => Number.isFinite(value) && value > 0)) return null;
+  const candidate = nextTradingSessionAfter(Number(daily.Date), String(raw.Name ?? raw.name ?? ""));
+  const today = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit" }).format(now).replaceAll("-", ""));
+  if (!candidate || candidate > maxSession || candidate > today) return null;
+  return validHighlightSnapshotSession({ ...raw, Date: candidate }, maxSession, now);
 }
 
 /** Use a complete dated daily row as a unit, never stamp an undated snapshot by price similarity. */

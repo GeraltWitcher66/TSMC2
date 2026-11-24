@@ -1620,6 +1620,7 @@ export default function ScreenerClient() {
     const shownSessionDate = highlightGroups.sessionDate ?? highlightSessionDate;
     const coverage = highlightCoverage(highlights, getScopeSymbols(highlightScope).length);
     const datedSessions = new Set(highlights.map(row => row.sessionDate).filter(Boolean));
+    const noTradeTodayRows = highlights.filter((row) => row.noTradeToday);
     const olderCommodityRows = highlights.filter(row => isThursdayCommodityInstrument(row.name)
       && row.sessionDate != null && row.sessionDate < expectedHighlightSession(row.name)
       && expectedHighlightSession(row.name) > expectedDate());
@@ -1639,6 +1640,7 @@ export default function ScreenerClient() {
         <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. چهار کارت معاملاتی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
+        {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
         {olderCommodityRows.length > 0 && <p className="partial-data-note">داده {faI.format(olderCommodityRows.length)} ابزار کالایی که ممکن است پنجشنبه معامله شده باشند، هنوز به آخرین جلسه مورد انتظار نرسیده است؛ تاریخ مشاهده‌شده هر نماد ملاک است، نه زمان بروزرسانی.</p>}
         {highlightClientTypeUnavailable && <p className="partial-data-note">قیمت‌ها دریافت شد، اما جزئیات حجم خرید و فروش حقیقی موقتاً از منبع رسمی در دسترس نبود.</p>}
         {highlights.some((row) => !row.sessionDate) && <p className="partial-data-note">تاریخ قیمت بعضی نمادها در منبع قابل تأیید نیست؛ زمان بروزرسانی به معنی تاریخ معامله نیست.</p>}

@@ -238,6 +238,7 @@ export type MarketHighlight = {
   clientTypeFetchedAt?: string;
   floorDate?: number | null;
   floorFetchedAt?: string;
+  noTradeToday?: boolean;
 };
 
 export type ValuationMetrics = {
@@ -512,6 +513,7 @@ export function marketHighlightFromInstrument(
     quoteSource: typeof raw.quoteSource === "string" ? raw.quoteSource : undefined,
     quoteFetchedAt: typeof raw.quoteFetchedAt === "string" ? raw.quoteFetchedAt : undefined,
     delivery: typeof raw.delivery === "string" ? raw.delivery : undefined,
+    noTradeToday: typeof raw.noTradeToday === "boolean" ? raw.noTradeToday : undefined,
     name: String(raw.Name ?? raw.name ?? ""),
     volume: Math.max(0, number("Volume", "volume")),
     value: Math.max(0, number("Value", "value")),

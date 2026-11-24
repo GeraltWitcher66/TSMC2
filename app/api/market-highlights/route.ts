@@ -7,7 +7,7 @@ import {
 import { datedCurrentQuotes } from "../../lib/current-quotes";
 import { officialDetails, HIGHLIGHT_BATCH_SIZE } from "../../lib/official-details";
 import { upstreamJson, type UpstreamDiagnostic } from "../../lib/upstream";
-import { instrumentFromDailyRows, instrumentSession, validHighlightSnapshotSession, datedClientType } from "../../lib/market-session";
+import { inferSnapshotSession, instrumentFromDailyRows, instrumentSession, validHighlightSnapshotSession, datedClientType } from "../../lib/market-session";
 import { highlightCoverage } from "../../lib/data-coverage";
 import { expectedHighlightSession } from "../../lib/highlight-session";
 
@@ -83,15 +83,20 @@ export async function POST(request: Request) {
           const maxSession = expectedHighlightSession(String(original.Name ?? original.name ?? key));
           const datedDaily = instrumentFromDailyRows(dailyBySymbol.get(normalizeSymbol(key)), maxSession);
           const originalDate = validHighlightSnapshotSession(original, maxSession);
-          const replacement = official && Number(official.Date) >= (originalDate ?? 0) && Number(official.Date) >= Number(datedDaily?.Date ?? 0)
-            ? official : datedDaily && Number(datedDaily.Date) > (originalDate ?? 0) ? datedDaily : !originalDate ? datedDaily : null;
+          const inferredDate = originalDate ? null : inferSnapshotSession(original, dailyBySymbol.get(normalizeSymbol(key)), maxSession);
+          const snapshotDate = originalDate ?? inferredDate;
+          const noTradeToday = !instrumentSession(original) && !snapshotDate && Boolean(datedDaily) && Number(datedDaily!.Date) < maxSession;
+          const replacement = official && Number(official.Date) >= (snapshotDate ?? 0) && Number(official.Date) >= Number(datedDaily?.Date ?? 0)
+            ? official : datedDaily && Number(datedDaily.Date) > (snapshotDate ?? 0) ? datedDaily : !snapshotDate ? datedDaily : null;
           // Undated real-money/floor fields must not travel with a dated replacement quote.
           const base: Record<string, unknown> = {
             ...original,
-            ...(originalDate ? {} : { Date: null, date: null, DEven: null, dEven: null }),
+            ...(snapshotDate ? (inferredDate ? { Date: inferredDate, AllowedMin: null, AllowedMinDate: null, NetRealValue: null, BuyPower: 0 } : {})
+              : { Date: null, date: null, DEven: null, dEven: null }),
+            ...(noTradeToday ? { noTradeToday: true } : {}),
             quoteSource: "zarvan-instruments", quoteFetchedAt: new Date().toISOString(), delivery: "source",
           };
-          const raw: Record<string, unknown> = replacement ? { ...base, ...(originalDate !== Number(replacement.Date) ? { AllowedMin: null, AllowedMinDate: null, NetRealValue: null, BuyPower: 0 } : {}), ...replacement } : base;
+          const raw: Record<string, unknown> = replacement ? { ...base, ...(snapshotDate !== Number(replacement.Date) ? { AllowedMin: null, AllowedMinDate: null, NetRealValue: null, BuyPower: 0 } : {}), ...replacement } : base;
           const dataDate = instrumentSession(raw);
           priceIssues.set(normalizeSymbol(key), !dataDate ? "date_unverified" : "price_record_invalid");
           const insCode = String(raw.InsCode ?? raw.insCode ?? raw.ins_code ?? "").trim();
