@@ -2014,6 +2014,10 @@ export default function ScreenerClient() {
           <h2 className="welcome-title">فیلتر بورس ایران</h2>
           <p className="welcome-sub">دیده‌بان شخصی بازار سرمایه</p>
           <div className="welcome-divider" />
+          <div className="welcome-contact">
+            <p className="welcome-label">شماره تماس</p>
+            <a className="welcome-phone" href="tel:+989113566575" dir="ltr">۰۹۱۱۳۵۶۶۵۷۵</a>
+          </div>
           <button className="primary-button welcome-btn" onClick={() => setShowWelcome(false)} type="button">ورود به برنامه</button>
         </div>
       </section>
