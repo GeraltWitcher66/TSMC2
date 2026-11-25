@@ -3,14 +3,18 @@ import { findRsiSwingDivergence, PATTERN_DEFAULTS, type RsiPattern } from "./div
 
 /**
  * Confirmed swing divergence uses two comparable price highs/lows and RSI(12)
- * computed from the adjusted CLOSE at corresponding swing dates. It can detect
- * regular (reversal warning) and hidden (trend continuation warning) patterns.
+ * at corresponding swing dates. Only two patterns exist (employer definition):
+ * positive = lower price low with higher RSI low; negative = higher price high
+ * with lower RSI high. Anything else is not a divergence.
  * Day-over-day changes are NOT interpreted as technical divergence.
  * The separate screener RSI column still uses adjusted LAST-trade prices for
- * backward compatibility; it is intentionally not the divergence oscillator.
+ * backward compatibility; the divergence oscillator uses `rsiSource`
+ * (adjusted CLOSE by default).
  */
 export const DIVERGENCE_DEFAULTS = Object.freeze({
   rsiPeriod: 12,
+  /** Price series used for the divergence RSI: adjusted closes or last trades. */
+  rsiSource: "close" as "close" | "last",
   /** Minimum closed sessions required before the engine analyses a symbol. */
   minimumHistory: 24,
   maxDataAgeDays: 7,
@@ -41,7 +45,7 @@ export type DivergenceAnalysis = {
   asOfDate: number | null;
   previousDate: number | null;
   rsi: number | null;
-  /** RSI(12) on adjusted closes, used exclusively for swing divergence. */
+  /** RSI(12) on the configured `rsiSource` series, used exclusively for swing divergence. */
   divergenceRsi: number | null;
   candleCount: number;
   /** Two confirmed swing extrema; null unless positive/negative. */
@@ -201,7 +205,7 @@ export function analyzeDivergence(candles: Candle[], changes: ShareChange[] = []
   const now = options.now ?? new Date();
   const clock = tehranMarketClock(now);
   const base: DivergenceAnalysis = {
-    version: "4", status: "none", reason: "در پیوت‌های تأییدشده اخیر واگرایی معمولی یا مخفی معتبر پیدا نشد.",
+    version: "4", status: "none", reason: "در پیوت‌های تأییدشده اخیر واگرایی معتبر پیدا نشد.",
     asOfDate: null, previousDate: null, rsi: null, divergenceRsi: null, candleCount: 0, divergence: null,
   };
   const stop = (status: DivergenceAnalysis["status"], reason: string) => ({ ...base, status, reason });
@@ -244,8 +248,9 @@ export function analyzeDivergence(candles: Candle[], changes: ShareChange[] = []
       last: (Number.isFinite(c.last) && c.last! > 0 ? c.last! : c.close) * factor,
     };
   });
+  const rsiBasis: "close" | "last" = config.rsiSource === "last" ? "last" : "close";
   const tableRsi = wilderRsi(adjusted.map((c) => c.last), config.rsiPeriod);
-  const patternRsi = wilderRsi(adjusted.map((c) => c.close), config.rsiPeriod);
+  const patternRsi = wilderRsi(adjusted.map((c) => (rsiBasis === "last" ? c.last : c.close)), config.rsiPeriod);
   const latestTableRsi = tableRsi.at(-1), latestPatternRsi = patternRsi.at(-1);
   base.rsi = latestTableRsi === null || latestTableRsi === undefined ? null : round(latestTableRsi);
   base.divergenceRsi = latestPatternRsi === null || latestPatternRsi === undefined ? null : round(latestPatternRsi);

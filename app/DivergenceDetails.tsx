@@ -17,7 +17,7 @@ function SessionCard({ title, dateValue, price, rsi, rsiDate, basis }: { title: 
     <dl>
       <div><dt>تاریخ:</dt><dd><b>{date(dateValue)}</b></dd></div>
       <div><dt>{basis === "low" ? "کف قیمت" : "سقف قیمت"}:</dt><dd><b dir="ltr">{faN.format(price)}</b> <span className="unit">ریال</span></dd></div>
-      <div><dt>RSI ۱۲ پایانی:</dt><dd><b dir="ltr">{faRsi.format(rsi)}</b>{rsiDate !== dateValue && <small> ({date(rsiDate)})</small>}</dd></div>
+      <div><dt>RSI(۱۲) قیمت پایانی:</dt><dd><b dir="ltr">{faRsi.format(rsi)}</b>{rsiDate !== dateValue && <small> ({date(rsiDate)})</small>}</dd></div>
     </dl>
   </div>;
 }
@@ -56,7 +56,7 @@ export default function DivergenceDetails({ row, onClose }: { row: ScreenerRow; 
               : null
     : "جزئیات تحلیل موجود نیست؛ اطلاعات نماد را بروزرسانی کنید.";
   return <dialog ref={dialog} className="divergence-dialog" aria-labelledby="divergence-title" onCancel={onClose} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="modal-head"><div><p className="eyebrow">پیوت‌های تأییدشده · سقف و کف روزانه · RSI ۱۲ قیمت پایانی</p><h2 id="divergence-title">تحلیل واگرایی {row.symbol}</h2></div><button className="icon-button" type="button" aria-label="بستن تحلیل واگرایی" onClick={onClose}>×</button></div>
+    <div className="modal-head"><div><p className="eyebrow">پیوت‌های تأییدشده · سقف و کف روزانه · RSI(۱۲) بر مبنای قیمت پایانی</p><h2 id="divergence-title">تحلیل واگرایی {row.symbol}</h2></div><button className="icon-button" type="button" aria-label="بستن تحلیل واگرایی" onClick={onClose}>×</button></div>
     <p className="divergence-explanation">{closeLabel ?? analysis?.reason ?? "—"}</p>
     {div && <>
       <div className="div-sessions">
@@ -75,9 +75,10 @@ export default function DivergenceDetails({ row, onClose }: { row: ScreenerRow; 
     <details className="divergence-rules" open={!div}>
       <summary>روش محاسبه</summary>
       <p>مبنای واگرایی، مقایسه <b>دو پیوت قیمت</b> در کندل‌های روزانه بسته‌شده و کف/سقف RSI نزدیک به همان تاریخ‌هاست؛ پیوت با دو کندل در هر سمت و فاصله حداقل پنج جلسه تأیید می‌شود. قیمت‌ها و RSI از داده تعدیل‌شده محاسبه می‌شوند.</p>
-      <p><b>RD+ معمولی مثبت:</b> کف دوم قیمت پایین‌تر، کف RSI بالاتر. <b>RD− معمولی منفی:</b> سقف قیمت بالاتر، سقف RSI پایین‌تر.</p>
-      <p><b>HD+ مخفی مثبت:</b> کف قیمت بالاتر و کف RSI پایین‌تر در روند صعودی. <b>HD− مخفی منفی:</b> سقف قیمت پایین‌تر و سقف RSI بالاتر در روند نزولی.</p>
-      <p><b>تفکیک دو RSI:</b> ستون RSI جدول بر مبنای آخرین معامله حفظ شده؛ RSI مورد استفاده برای واگرایی از قیمت پایانی همان بازه محاسبه می‌شود. MACD در این نسخه محاسبه و تأیید نشده است. نبود پیوت یا تأیید روند یعنی هشدار صادر نمی‌شود؛ هیچ واگرایی تضمین خرید یا فروش نیست.</p>
+      <p><b>واگرایی منفی (نزولی):</b> سقف دوم قیمت <b>بالاتر</b> از سقف قبلی و سقف RSI <b>پایین‌تر</b> از سقف قبلی باشد.</p>
+      <p><b>واگرایی مثبت (صعودی):</b> کف دوم قیمت <b>پایین‌تر</b> از کف قبلی و کف RSI <b>بالاتر</b> از کف قبلی باشد.</p>
+      <p>هیچ حالت دیگری واگرایی نیست؛ حالت «مخفی» وجود ندارد. سقف/کف تخت (دو روز با قیمت برابر، مثل روزهای صف) یک پیوت است و اولین کندل آن پیوت محسوب می‌شود؛ سیگنالی که پیوت دوم آن بیش از ۱۰ جلسه پیش باشد صادر نمی‌شود.</p>
+      <p><b>تفکیک دو RSI:</b> ستون RSI ۱۲ جدول بر مبنای آخرین معامله روز است، اما <b>RSI(۱۲) بر مبنای قیمت پایانی</b> برای واگرایی محاسبه می‌شود. MACD در این نسخه محاسبه و تأیید نشده است؛ هیچ واگرایی تضمین خرید یا فروش نیست.</p>
     </details>
   </dialog>;
 }

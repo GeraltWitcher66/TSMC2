@@ -1474,8 +1474,15 @@ export default function ScreenerClient() {
   const posCount = periodMetrics.filter((m) => m.returnPct > 0).length;
   const negCount = periodMetrics.filter((m) => m.returnPct < 0).length;
   const oversoldCount = enrichedRows.filter((r) => r.rsi !== null && r.rsi <= 30).length;
-  const bullishDivCount = enrichedRows.filter((r) => r.divergence?.kind === "positive").length;
-  const bearishDivCount = enrichedRows.filter((r) => r.divergence?.kind === "negative").length;
+  // A symbol whose last dated candle is older than the expected session is
+  // closed (halted/no trade today); its old pattern is labelled but never
+  // counted as a current signal.
+  const divergencesInSession = enrichedRows.filter((r) => {
+    const session = screenerQuoteSession(r);
+    return session === null || session >= expectedSession;
+  });
+  const bullishDivCount = divergencesInSession.filter((r) => r.divergence?.kind === "positive").length;
+  const bearishDivCount = divergencesInSession.filter((r) => r.divergence?.kind === "negative").length;
   const epsSectorPeCount = enrichedRows.filter((r) => r.valuation?.epsSectorPePositive).length;
   const peBelowSectorCount = enrichedRows.filter((r) => r.valuation?.peBelowSector).length;
   const biggestDD = periodMetrics.length ? Math.max(...periodMetrics.map((m) => m.drawdownPct)) : null;
@@ -1708,8 +1715,8 @@ export default function ScreenerClient() {
       <article><span>بازده مثبت دوره</span><strong className="positive">{faI.format(posCount)}</strong><small>قیمت ابتدای دوره تا آخرین پایانی</small></article>
       <article><span>بازده منفی دوره</span><strong className="negative">{faI.format(negCount)}</strong><small>نمادهایی که نسبت به ابتدای دوره افت کرده‌اند</small></article>
       <article><span>RSI زیر یا مساوی ۳۰</span><strong className="warning-text">{faI.format(oversoldCount)}</strong><small>RSI استاندارد ۱۲ روزه · مبنای آخرین معامله روز</small></article>
-      <article><span>🟢 واگرایی مثبت (RD+ / HD+)</span><strong className="positive">{faI.format(bullishDivCount)}</strong><small>کف‌های تأییدشده قیمت و RSI · معمولی یا مخفی</small></article>
-      <article><span>🔴 واگرایی منفی (RD− / HD−)</span><strong className="negative">{faI.format(bearishDivCount)}</strong><small>سقف‌های تأییدشده قیمت و RSI · معمولی یا مخفی</small></article>
+      <article><span>🟢 واگرایی مثبت</span><strong className="positive">{faI.format(bullishDivCount)}</strong><small>کف قیمت پایین‌تر · کف RSI(۱۲) قیمت پایانی بالاتر</small></article>
+      <article><span>🔴 واگرایی منفی</span><strong className="negative">{faI.format(bearishDivCount)}</strong><small>سقف قیمت بالاتر · سقف RSI(۱۲) قیمت پایانی پایین‌تر</small></article>
       <article><span>🟢 EPS × P/E گروه</span><strong className="positive">{faI.format(epsSectorPeCount)}</strong><small>برآورد گروه بالاتر از قیمت پایانی</small></article>
       <article><span>🟢 P/E سهم و گروه</span><strong className="positive">{faI.format(peBelowSectorCount)}</strong><small>P/E سهم کمتر از P/E گروه</small></article>
     </section>;
@@ -1765,8 +1772,9 @@ export default function ScreenerClient() {
         <td><span className={`metric-pill ${(m?.drawdownPct ?? 0) > 0 ? "down" : "flat"}`}>{drop(m?.drawdownPct)}</span></td>
         <td><span className={`rsi-value ${row.rsi !== null && row.rsi <= 30 ? "oversold" : ""}`}>{row.rsi === null ? "—" : faN.format(row.rsi)}</span></td>
         <td><button type="button" className="divergence-inspect" onClick={() => setDivergenceView(row)} aria-label={`تحلیل واگرایی ${row.symbol}`}>
+          {earlierThanCalendar && <span className="divergence-pill div-closed" title="آخرین کندل این نماد از آخرین جلسه بازار قدیمی‌تر است؛ در شمارنده‌ها حساب نمی‌شود.">نماد بسته</span>}
           {div ? <span className={`divergence-pill ${div.kind === "positive" ? "div-bullish" : "div-bearish"}`}>{div.label}</span> : <span className="muted">{row.divergenceAnalysis && row.divergenceAnalysis.status === "insufficient" ? "داده کافی نیست" : row.divergenceAnalysis && row.divergenceAnalysis.status === "stale" ? "داده قدیمی است" : row.divergenceAnalysis && row.divergenceAnalysis.status === "unverified" ? "داده ناقص برای واگرایی" : row.divergenceAnalysis && row.divergenceAnalysis.status === "adjustment" ? "در انتظار تأیید افزایش سرمایه" : row.divergenceAnalysis && row.divergenceAnalysis.status === "invalid" ? "داده نامعتبر" : "بدون واگرایی"}</span>}
-          <small>مشاهده جزئیات</small></button></td>
+          <small>{div ? `${faI.format(div.barsSincePivot)} جلسه پیش · جزئیات` : "مشاهده جزئیات"}</small></button></td>
         <td><HolderChangeCell loading={holderChangesLoading} summary={holderChange} meta={holderChangeMeta[normalizeSymbol(row.symbol)]} /></td>
         <td><div className={`valuation-cell ${valuation?.epsSectorPePositive ? "is-positive" : ""}`}>
           {valuation?.epsSectorPePositive && <span className="positive-dot" title="حالت مثبت" />}
