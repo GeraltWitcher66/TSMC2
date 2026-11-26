@@ -14,10 +14,10 @@ import { aggregateIndustrySymbols, type MarketQuote, type SymbolFlow } from "./i
 const TSETMC_BASE = "https://cdn.tsetmc.com/api";
 const RELAY = "/api/tsetmc-relay?path=";
 const CONCURRENCY = 6;
+// Only Accept: Referer is a forbidden header in the browser and User-Agent
+// turns the request into a preflighted CORS call on older Firefox builds.
 const TSETMC_HEADERS = {
   Accept: "application/json, text/plain, */*",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-  Referer: "https://tsetmc.com/",
 };
 
 export type HistorySymbol = { insCode: string; symbol: string; name: string; sectorCode: string };

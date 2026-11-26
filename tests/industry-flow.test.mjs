@@ -34,6 +34,11 @@ test("fund rows are split by fund type in the requested order", () => {
   assert.equal(fundKind("صندوق سرمایه گذاری سهامی"), "صندوق سهامی");
   assert.equal(fundKind("کارا", "کارا-س"), "صندوق سهامی");
   assert.equal(fundKind("صندوق سرمایه گذاری مختلط"), "صندوق مختلط و سایر");
+  // The «-د»/«-س» suffix lives in the fund's name, with or without a space
+  // before the hyphen; checking only the symbol sent these to «مختلط و سایر».
+  assert.equal(fundKind("صندوق س. کارا -د", "کارا"), "صندوق درآمد ثابت");
+  assert.equal(fundKind("صندوق س. آوند مفید-د", "آوند"), "صندوق درآمد ثابت");
+  assert.equal(fundKind("ص.س.اهرمی موج فیروزه-س", "موج"), "صندوق اهرمی");
   // Order matters: a leveraged fund whose name also mentions gold stays leveraged.
   assert.equal(fundKind("صندوق اهرمی طلا"), "صندوق اهرمی");
 });

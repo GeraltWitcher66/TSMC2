@@ -1028,6 +1028,13 @@ export default function ScreenerClient() {
     }
   }
 
+  // The watch endpoint can answer empty without its standard query, so the
+  // whole-market request always carries every paper type.
+  const marketWatchPath = "ClosingPrice/GetMarketWatch?" + [
+    "market=0", "industrialGroup=", "showTraded=false", "withBestLimits=false", "hEven=0", "RefID=0",
+    ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => `paperTypes%5B${index}%5D=${index + 1}`),
+  ].join("&");
+
   /** Official TSETMC read: direct CDN when reachable, else the same-origin relay. */
   async function readTsetmc(path: string): Promise<unknown> {
     const readDirect = async () => {
@@ -1045,7 +1052,8 @@ export default function ScreenerClient() {
         if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400));
       }
     }
-    const response = await requestData(`tsetmc-relay?path=${encodeURIComponent(path)}`, {}, 25_000);
+    // The relay takes a bare path and adds the fixed watch query itself.
+    const response = await requestData(`tsetmc-relay?path=${encodeURIComponent(path.split("?")[0])}`, {}, 25_000);
     if (!response.ok) throw new Error(`TSETMC HTTP ${response.status}`);
     return await readApiJson<unknown>(response);
   }
@@ -1113,7 +1121,7 @@ export default function ScreenerClient() {
       try {
         // Independent reads: a failed money-flow call must not discard usable prices.
         const [watch, clients] = await Promise.allSettled([
-          readTsetmc("ClosingPrice/GetMarketWatch"),
+          readTsetmc(marketWatchPath),
           readTsetmc("ClientType/GetClientTypeAll"),
         ]);
         quotes = watch.status === "fulfilled" ? parseMarketWatch(watch.value) : [];

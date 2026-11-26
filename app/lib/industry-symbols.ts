@@ -28,7 +28,13 @@ export const FUND_KINDS: FundKind[] = [
 /** A fund's row is decided by its name, in this exact order. */
 export function fundKind(name: string, symbol = ""): FundKind {
   const text = normalizeIndustryName(`${name} ${symbol}`).toLowerCase();
-  const endsWith = (suffix: string) => normalizeIndustryName(symbol).endsWith(suffix);
+  // The «-د»/«-س» suffix sits in the fund's name, sometimes after a space
+  // («کارا -د» and «کارا-د» are the same fund type), so spaces around the
+  // hyphen are dropped before the suffix check.
+  const compact = (value: string) => normalizeIndustryName(value).replace(/\s*-\s*/g, "-");
+  const named = compact(name);
+  const quoted = compact(symbol);
+  const endsWith = (suffix: string) => named.endsWith(suffix) || quoted.endsWith(suffix);
   if (text.includes("اهرمی")) return "صندوق اهرمی";
   if (text.includes("زعفران")) return "صندوق زعفران";
   if (/طلا|عیار|مثقال|کالا|کالای|زر/.test(text)) return "صندوق طلا و کالا";
