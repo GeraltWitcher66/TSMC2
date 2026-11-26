@@ -21,19 +21,22 @@ test("industry aggregates keep the source's whole-market totals and rank by net 
   assert.throws(() => parseIndustries([{ sector_name: "" }]), /نام صنایع/);
 });
 
-test("three-day industry totals add money and value but keep the newest buy power", () => {
-  const row = (name, net, value, buyPower, symbols = 1) => ({ code: name, name, net, value, buyPower, symbols });
-  const day1 = { date: 20261123, rows: [row("فلزات", 100, 1000, 9), row("بانک", -50, 400, 0.5)] };
-  const day2 = { date: 20261124, rows: [row("فلزات", 200, 2000, 4)] };
-  const day3 = { date: 20261125, rows: [row("فلزات", 300, 3000, 2.1, 56), row("بانک", 25, 100, 1.2)] };
+test("three-day industry totals add money, value and buy-power components", () => {
+  const row = (name, net, value, parts = {}, symbols = 1) => ({ code: name, name, net, value, buyPower: null, symbols,
+    realBuyValue: null, realSellValue: null, buyCount: null, sellCount: null, ...parts });
+  const day1 = { date: 20261123, rows: [row("فلزات", 100, 1000, { realBuyValue: 500, buyCount: 10, realSellValue: 200, sellCount: 10 }), row("بانک", -50, 400)] };
+  const day2 = { date: 20261124, rows: [row("فلزات", 200, 2000, { realBuyValue: 500, buyCount: 20, realSellValue: 300, sellCount: 30 })] };
+  const day3 = { date: 20261125, rows: [row("فلزات", 300, 3000, { realBuyValue: 200, buyCount: 10, realSellValue: 200, sellCount: 10 }, 56), row("بانک", 25, 100)] };
   const summed = sumIndustrySessions([day3, day1, day2], 3);
   assert.deepEqual(summed.map((item) => item.name), ["فلزات", "بانک"]);
   assert.equal(summed[0].net, 600, "money inflow is the sum of the recorded sessions");
   assert.equal(summed[0].value, 6000);
-  assert.equal(summed[0].buyPower, 2.1, "a ratio is never added across days");
+  // (1200/40) / (700/50): rebuilt from summed components, never added or copied.
+  assert.equal(summed[0].buyPower, (1200 / 40) / (700 / 50));
   assert.equal(summed[0].symbols, 56, "symbol count comes from the newest session");
   assert.equal(summed[1].net, -25);
   assert.equal(summed[1].value, 500);
+  assert.equal(summed[1].buyPower, null, "a session without components has no ratio");
   // Only the requested window is summed.
   assert.equal(sumIndustrySessions([day1, day2, day3], 1)[0].net, 300);
   assert.deepEqual(sumIndustrySessions([], 3), []);

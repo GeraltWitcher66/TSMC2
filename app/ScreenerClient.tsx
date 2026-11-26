@@ -28,8 +28,15 @@ import { HIGHLIGHT_BATCH_SIZE } from "./lib/official-details";
 import { highlightCoverage, emptyDataMessage } from "./lib/data-coverage";
 import {
   INDUSTRY_SOURCE_URL, parseIndustries, readIndustrySnapshots, sumIndustrySessions,
+  readBackfilledSessions, sectorNameMap, shortIndustryName, compactToman, withoutBuyPower, writeBackfilledSessions,
+  readSectorNameCache, writeSectorNameCache,
   upsertIndustrySnapshot, writeIndustrySnapshots, type IndustryRow, type IndustrySnapshot,
 } from "./lib/industry";
+import {
+  aggregateIndustrySymbols, dropIndustriesWithoutTradableSymbols, historySymbols, industryStatsText,
+  FUND_KINDS, parseClientTypeAll, parseMarketWatch, type MarketQuote,
+} from "./lib/industry-symbols";
+import { backfillIndustryHistory, type BackfillProgress, type HistorySymbol } from "./lib/industry-history";
 import {
   closingPriceGap,
   isSellQueueToPositive,
@@ -319,7 +326,10 @@ function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; e
   </article>;
 }
 
-function IndustryInflowCard({ number, title, subtitle, rows, loading, error, fetchedAt, emptyText, onRetry, sessions }: {
+type IndustrySortKey = "name" | "net" | "value" | "buyPower";
+const faOneDecimal = new Intl.NumberFormat("fa-IR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+function IndustryFlowCard({ number, title, subtitle, rows, loading, error, fetchedAt, emptyText, onRetry, sessions, note, progress }: {
   number: string;
   title: string;
   subtitle: string;
@@ -331,23 +341,57 @@ function IndustryInflowCard({ number, title, subtitle, rows, loading, error, fet
   onRetry?: () => void;
   /** Recorded sessions summed into this card; omitted for a single session. */
   sessions?: number;
+  note?: string;
+  progress?: BackfillProgress | null;
 }) {
-  // The source reports Rial while the client's reference table is in Toman.
-  const toman = (rial: number | null) => rial === null ? "—" : `${faCompact.format(rial / 10)} تومان`;
-  return <article className="highlight-card">
+  const [sortKey, setSortKey] = useState<IndustrySortKey>("net");
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const shown = useMemo(() => {
+    const direction = sortDir === "desc" ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      if (sortKey === "name") return direction * shortIndustryName(a.name).localeCompare(shortIndustryName(b.name), "fa");
+      const left = a[sortKey] ?? null;
+      const right = b[sortKey] ?? null;
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      return direction * (left - right);
+    }).slice(0, 15);
+  }, [rows, sortKey, sortDir]);
+  const sortBy = (key: IndustrySortKey) => {
+    if (sortKey === key) setSortDir((current) => current === "desc" ? "asc" : "desc");
+    else { setSortKey(key); setSortDir(key === "name" ? "asc" : "desc"); }
+  };
+  const caret = (key: IndustrySortKey) => sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : "";
+  const rating = (value: number | null) => value === null ? "—" : faOneDecimal.format(value);
+  return <article className="highlight-card industry-card">
     <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">⇧</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
-    <p className="holder-highlight-status">{sessions ? `۱۵ صنعت اول · جمع ${faI.format(sessions)} جلسه ثبت‌شده` : "۱۵ صنعت اول بر پایه خالص ورود پول حقیقی · ارقام از جمع صنعت در منبع داده"}{loading ? " · در حال بروزرسانی…" : ""}{fetchedAt ? ` · ${faDT.format(new Date(fetchedAt))}` : ""}</p>
-    <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr>
-      <th>صنعت</th><th>ورود پول (تومان)</th><th>ارزش معاملات (تومان)</th><th title={sessions ? "قدرت خرید اعلامی منبع برای آخرین جلسه؛ نسبت است و جمع زده نمی‌شود" : "قدرت خرید اعلامی منبع داده برای همین صنعت"}>قدرت خرید</th><th>نماد</th>
-    </tr></thead><tbody>{rows.map((row) => <tr key={`${row.code}-${row.name}`}>
-      <td><strong>{row.name}</strong></td>
-      <td><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"}>{toman(row.net)}</strong></td>
-      <td><strong>{toman(row.value)}</strong></td>
-      <td><strong dir="ltr">{row.buyPower === null ? "—" : faN.format(row.buyPower)}</strong></td>
-      <td><small>{faI.format(row.symbols)}</small></td>
+    <p className="holder-highlight-status">{sessions !== undefined ? `۱۵ گروه اول · جمع ${faI.format(sessions)} جلسه معاملاتی` : "۱۵ گروه اول بر پایه خالص ورود پول حقیقی"} · {faI.format(rows.length)} گروه{loading ? " · در حال بروزرسانی…" : ""}{fetchedAt ? ` · ${faDT.format(new Date(fetchedAt))}` : ""}</p>
+    <div className="industry-actions">
+      <button className={`industry-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
+      {note && <span className="industry-note">{note}</span>}
+    </div>
+    {helpOpen && <div className="industry-formulas">
+      <p>ورود پول = Σ (حجم خرید حقیقی − حجم فروش حقیقی) × قیمت پایانی همان نماد.</p>
+      <p>ارزش معاملات = Σ ارزش معاملات نمادهای صنعت.</p>
+      <p>قدرت خرید = (Σ ارزش خرید حقیقی ÷ Σ تعداد خریدار حقیقی) ÷ (Σ ارزش فروش حقیقی ÷ Σ تعداد فروشنده حقیقی)؛ میانگین نسبت نمادها گرفته نمی‌شود.</p>
+      <p>نمادهای روز اول معامله و نمادهایی با تغییر بیرون از ±۵۰٪ در جمع نمی‌آیند؛ صندوق‌ها بر پایه نوع صندوق تفکیک شده‌اند.</p>
+    </div>}
+    {progress && <p className="industry-progress" role="status">{progress.phase === "prices" ? "دریافت تاریخچه قیمت" : "دریافت داده حقیقی جلسه‌ها"}: {faI.format(progress.done)} از {faI.format(progress.total)}</p>}
+    <div className="table-wrap highlight-table industry-table"><table aria-label={title}><thead><tr>
+      <th><button type="button" className="industry-sort" onClick={() => sortBy("name")}>گروه{caret("name")}</button></th>
+      <th><button type="button" className="industry-sort" onClick={() => sortBy("net")}>ورود پول (تومان){caret("net")}</button></th>
+      <th><button type="button" className="industry-sort" onClick={() => sortBy("value")}>ارزش معاملات (تومان){caret("value")}</button></th>
+      <th><button type="button" className="industry-sort" onClick={() => sortBy("buyPower")}>قدرت خرید{caret("buyPower")}</button></th>
+    </tr></thead><tbody>{shown.map((row) => <tr key={`${row.code}-${row.name}`}>
+      <td><strong title={row.name}>{shortIndustryName(row.name)}</strong><small>{faI.format(row.symbols)} نماد</small></td>
+      <td><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"} dir="ltr">{compactToman(row.net)}</strong></td>
+      <td><strong dir="ltr">{compactToman(row.value)}</strong></td>
+      <td><strong dir="ltr" className={row.buyPower === null ? "muted" : row.buyPower >= 1 ? "positive" : "negative"}>{rating(row.buyPower)}</strong></td>
     </tr>)}</tbody></table></div>
     {error && <p className="scan-error" role="alert">جمع صنعت‌ها دریافت نشد: {error}{onRetry && <button className="source-chip" type="button" disabled={loading} onClick={onRetry}>تلاش مجدد</button>}</p>}
-    {!rows.length && <div className="highlight-empty">{loading ? "در حال دریافت جمع صنعت‌ها از منبع…" : error || emptyText}</div>}
+    {!shown.length && <div className="highlight-empty">{loading ? "در حال دریافت جمع صنعت‌ها…" : error || emptyText}</div>}
   </article>;
 }
 
@@ -444,6 +488,13 @@ export default function ScreenerClient() {
   const [industriesError, setIndustriesError] = useState("");
   const [industriesFetchedAt, setIndustriesFetchedAt] = useState("");
   const industriesRequested = useRef(false);
+  const [industryNote, setIndustryNote] = useState("");
+  const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
+  const industrySnapshotsRef = useRef<IndustrySnapshot[]>(industrySnapshots);
+  const industrySymbolsRef = useRef<HistorySymbol[]>([]);
+  const industryNamesRef = useRef<Record<string, string>>({});
+  const backfillRunning = useRef(false);
+  const activeBackfill = useRef<AbortController | null>(null);
   const [highlightHoldings, setHighlightHoldings] = useState<HoldingPage | null>(null);
   const [highlightHoldingsLoading, setHighlightHoldingsLoading] = useState(false);
   const [highlightHoldingsError, setHighlightHoldingsError] = useState("");
@@ -956,46 +1007,151 @@ export default function ScreenerClient() {
     }
   }
 
-  async function loadIndustries() {
-    setIndustriesLoading(true);
-    setIndustriesError("");
-    try {
-      // The browser's direct read is the same public feed the price path uses;
-      // the Worker route is the fallback when that read is blocked. A
-      // cache-busting query keeps this a simple CORS request: a Cache-Control
-      // header would force a preflight the data host does not answer.
-      const readDirectOnce = async () => {
-        const response = await fetchWithTimeout(`${INDUSTRY_SOURCE_URL}?_=${Date.now()}`, {
-          headers: { Accept: "application/json" },
-        }, 15_000);
-        if (!response.ok) throw new Error(`منبع صنایع HTTP ${response.status} برگرداند.`);
-        return parseIndustries(await response.json());
-      };
-      const readDirect = async () => {
-        try { return await readDirectOnce(); }
-        catch (error) {
-          await new Promise((resolve) => setTimeout(resolve, 900));
-          return await readDirectOnce().catch(() => { throw error; });
-        }
-      };
-      const readWorker = async () => {
+  async function readSectorFeed(): Promise<IndustryRow[]> {
+    // The published feed is the fallback: direct CORS read first, Worker route second.
+    const readDirectOnce = async () => {
+      const response = await fetchWithTimeout(`${INDUSTRY_SOURCE_URL}?_=${Date.now()}`, {
+        headers: { Accept: "application/json" },
+      }, 15_000);
+      if (!response.ok) throw new Error(`منبع صنایع HTTP ${response.status} برگرداند.`);
+      return parseIndustries(await response.json());
+    };
+    try { return await readDirectOnce(); }
+    catch {
+      try { return await readDirectOnce(); }
+      catch {
         const response = await requestData("sector-map", {}, 25_000);
         const body = await readApiJson<{ industries?: unknown; error?: string }>(response);
         if (!response.ok) throw new Error(body.error || `Worker HTTP ${response.status}`);
         return parseIndustries(body.industries);
-      };
-      let rows: IndustryRow[];
-      try { rows = await readDirect(); }
-      catch { rows = await readWorker(); }
-      setIndustries(rows);
-      setIndustriesFetchedAt(new Date().toISOString());
-      // One recorded session per market date, the raw material of the 3-day card.
-      const session = expectedDate();
-      setIndustrySnapshots((previous) => {
-        const next = upsertIndustrySnapshot(previous, session, rows);
-        writeIndustrySnapshots(next);
-        return next;
+      }
+    }
+  }
+
+  /** Official TSETMC read: direct CDN when reachable, else the same-origin relay. */
+  async function readTsetmc(path: string): Promise<unknown> {
+    const readDirect = async () => {
+      const response = await fetchWithTimeout(`https://cdn.tsetmc.com/api/${path}`, {
+        headers: { Accept: "application/json" },
+      }, 20_000);
+      if (!response.ok) throw new Error(`TSETMC HTTP ${response.status}`);
+      return await response.json();
+    };
+    // TSETMC answers intermittently from some networks; a few short retries
+    // recover a transient reset before the relay is used.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await readDirect(); }
+      catch {
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+    const response = await requestData(`tsetmc-relay?path=${encodeURIComponent(path)}`, {}, 25_000);
+    if (!response.ok) throw new Error(`TSETMC HTTP ${response.status}`);
+    return await readApiJson<unknown>(response);
+  }
+
+  /**
+   * Fill the multi-session card from TSETMC history: one price sweep (each
+   * symbol returns several sessions) plus one ClientType record per symbol and
+   * session, six requests at a time, recorded once per session.
+   */
+  async function fillIndustryHistory(current: IndustrySnapshot[]) {
+    const needed = 3 - current.length;
+    if (backfillRunning.current || needed <= 0 || !industrySymbolsRef.current.length) return;
+    backfillRunning.current = true;
+    const controller = new AbortController();
+    activeBackfill.current = controller;
+    setBackfillProgress({ phase: "prices", done: 0, total: industrySymbolsRef.current.length });
+    try {
+      const sessions = await backfillIndustryHistory(industrySymbolsRef.current, industryNamesRef.current, {
+        needed,
+        excludeDates: [...current.map((snapshot) => snapshot.date), ...readBackfilledSessions()],
+        signal: controller.signal,
+        onProgress: (update) => {
+          if (update.done === update.total || update.done % 5 === 0) setBackfillProgress(update);
+        },
       });
+      if (sessions.length) {
+        setIndustrySnapshots((previous) => {
+          let next = previous;
+          for (const session of sessions) next = upsertIndustrySnapshot(next, session.date, session.rows);
+          industrySnapshotsRef.current = next;
+          writeIndustrySnapshots(next);
+          return next;
+        });
+      }
+      // Only a session with real industry rows counts as filled; a fund-only
+      // sweep is retried on the next load instead of being frozen into history.
+      const usable = sessions.filter((session) => session.rows.length > FUND_KINDS.length);
+      writeBackfilledSessions([...readBackfilledSessions(), ...usable.map((session) => session.date), expectedDate()]);
+    } catch { /* the card keeps the sessions it already has */ }
+    finally {
+      backfillRunning.current = false;
+      activeBackfill.current = null;
+      setBackfillProgress(null);
+    }
+  }
+
+  async function loadIndustries() {
+    setIndustriesLoading(true);
+    setIndustriesError("");
+    try {
+      let fallback: IndustryRow[] = [];
+      let feedError = "";
+      try { fallback = await readSectorFeed(); }
+      catch (error) { feedError = error instanceof Error ? error.message : "دریافت منبع صنایع ناموفق بود."; }
+      // A failed sector feed must not silently collapse every industry to funds.
+      let names = sectorNameMap(fallback);
+      if (Object.keys(names).length) writeSectorNameCache(names);
+      else names = readSectorNameCache();
+
+      let rows: IndustryRow[] | null = null;
+      let quoteSymbols: HistorySymbol[] = [];
+      let quotes: MarketQuote[] = [];
+      let note = "";
+      let symbolBased = false;
+      try {
+        // Independent reads: a failed money-flow call must not discard usable prices.
+        const [watch, clients] = await Promise.allSettled([
+          readTsetmc("ClosingPrice/GetMarketWatch"),
+          readTsetmc("ClientType/GetClientTypeAll"),
+        ]);
+        quotes = watch.status === "fulfilled" ? parseMarketWatch(watch.value) : [];
+        const flows = clients.status === "fulfilled" ? parseClientTypeAll(clients.value) : parseClientTypeAll(null);
+        if (quotes.length) quoteSymbols = historySymbols(quotes, names);
+        if (quotes.length && flows.size) {
+          const aggregated = aggregateIndustrySymbols(quotes, flows, names);
+          if (aggregated.rows.length) {
+            rows = aggregated.rows;
+            symbolBased = true;
+            note = industryStatsText(aggregated.stats, quotes.length);
+            if (!Object.keys(names).length) note += " · نام صنایع از منبع نرسید؛ فقط صندوق‌ها تفکیک شدند.";
+          }
+        }
+      } catch { /* degraded mode below */ }
+
+      if (!rows) {
+        if (!fallback.length) throw new Error(feedError || "داده صنعت از هیچ منبعی دریافت نشد.");
+        // Never publish the feed's mean-based buy power as if it were the ratio of sums.
+        rows = withoutBuyPower(dropIndustriesWithoutTradableSymbols(fallback, quotes, names));
+        note = "داده نمادی در دسترس نبود؛ ورود پول و ارزش از منبع صنعتی خوانده شد و قدرت خرید نامشخص است.";
+      }
+
+      setIndustries(rows);
+      setIndustryNote(note);
+      setIndustriesFetchedAt(new Date().toISOString());
+      industrySymbolsRef.current = quoteSymbols;
+      industryNamesRef.current = names;
+
+      // A degraded (fund-only) day is shown but never recorded as history.
+      if (symbolBased) {
+        const session = expectedDate();
+        const next = upsertIndustrySnapshot(industrySnapshotsRef.current, session, rows);
+        industrySnapshotsRef.current = next;
+        writeIndustrySnapshots(next);
+        setIndustrySnapshots(next);
+        if (next.length < 3) void fillIndustryHistory(next);
+      }
     } catch (error) {
       industriesRequested.current = false;
       setIndustriesError(error instanceof Error ? error.message : "دریافت جمع صنعت‌ها ناموفق بود.");
@@ -1745,7 +1901,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را به تفکیک صنعت (روزانه و جمع ۳ جلسه آخرِ ثبت‌شده) جمع می‌زنند و ۱۵ صنعت اول را مرتب می‌کنند؛ چهار کارت بعدی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ چهار کارت بعدی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -1756,8 +1912,8 @@ export default function ScreenerClient() {
       </div>
       <p className="partial-data-note" role="status">پوشش از {faI.format(coverage.requested)} نماد: قیمت تاریخ‌دار {faI.format(coverage.datedPrices)}، حجم {faI.format(coverage.volume)}، ارزش معاملات {faI.format(coverage.value)}، حجم حقیقی {faI.format(coverage.clientType)}، ارزش حقیقی {faI.format(coverage.realValues)}، کف مجاز {faI.format(coverage.floor)}؛ دریافت‌نشده {faI.format(coverage.unreceived)}، دادهٔ قبلی {faI.format(coverage.cached)}.</p>
       <div className="highlight-grid">
-        <IndustryInflowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
-        <IndustryInflowCard number="۲" title="ورود پول به صنعت (۳ روزه)" subtitle="جمع ۳ جلسه آخرِ ثبت‌شده برای هر صنعت" sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} emptyText="برای جمع ۳ روزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
+        <IndustryFlowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
+        <IndustryFlowCard number="۲" title={industrySessions >= 3 ? "ورود پول به صنعت (۳ روزه)" : `ورود پول به صنعت (جمع ${faI.format(industrySessions)} جلسه)`} subtitle={industrySessions >= 3 ? "جمع ۳ جلسه آخر معاملاتی به تفکیک صنعت" : "۳ جلسه کامل نشده؛ ارقام جمع جلسه‌های ثبت‌شده است"} sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} progress={backfillProgress} emptyText="برای جمع چندروزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <HighlightCard number="۳" title="بیشترین ورود پول حقیقی روزانه" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" rows={highlightGroups.realMoney} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
         <HighlightCard number="۴" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
         <HighlightCard number="۵" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />

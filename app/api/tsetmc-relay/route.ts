@@ -13,6 +13,7 @@ import { upstreamJson, type UpstreamDiagnostic } from "../../lib/upstream";
 import { validOfficialDatedPayload } from "../../lib/official-details";
 
 const ALLOWED_PREFIXES = [
+  "ClosingPrice/GetMarketWatch",
   "ClosingPrice/GetClosingPriceInfo/",
   "ClosingPrice/GetClosingPriceDailyList/",
   "Instrument/GetInstrumentShareChange/",
@@ -25,6 +26,13 @@ const ALLOWED_PREFIXES = [
 ] as const;
 
 const TSETMC_HOSTS = ["cdn.tsetmc.com", "tsetmc.com"] as const;
+
+// The relay only accepts a bare path, so the market-watch query is fixed here.
+// It asks for every instrument type of the whole market without order books.
+const MARKET_WATCH_QUERY = [
+  "market=0", "industrialGroup=", "showTraded=true", "withBestLimits=false", "hEven=0", "RefID=0",
+  ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => `paperTypes%5B${index}%5D=${index + 1}`),
+].join("&");
 
 // Browser-like headers; TSETMC rejects requests that look like scripts.
 const TSETMC_HEADERS: Record<string, string> = {
@@ -61,7 +69,10 @@ export async function fetchTsetmcViaHosts(path: string, signal?: AbortSignal, ob
     if (signal?.aborted) return null;
     if (!relayHostAvailable(host)) continue;
     try {
-      const payload = await upstreamJson(`https://${host}/api/${path}`, {
+      const target = path.startsWith("ClosingPrice/GetMarketWatch")
+        ? `https://${host}/api/${path}?${MARKET_WATCH_QUERY}`
+        : `https://${host}/api/${path}`;
+      const payload = await upstreamJson(target, {
         headers: TSETMC_HEADERS,
         signal, timeoutMs: 8_000, observe, request,
       });
