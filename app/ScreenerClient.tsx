@@ -27,6 +27,10 @@ import { lastClosedEquitySession, preserveHighlightRows, preferHolderSource, sou
 import { HIGHLIGHT_BATCH_SIZE } from "./lib/official-details";
 import { highlightCoverage, emptyDataMessage } from "./lib/data-coverage";
 import {
+  INDUSTRY_SOURCE_URL, parseIndustries, readIndustrySnapshots, sumIndustrySessions,
+  upsertIndustrySnapshot, writeIndustrySnapshots, type IndustryRow, type IndustrySnapshot,
+} from "./lib/industry";
+import {
   closingPriceGap,
   isSellQueueToPositive,
   parseSymbolList,
@@ -65,6 +69,7 @@ type HolderIncreaseRow = {
 };
 type ActionView = { row: ScreenerRow; actions: CorporateAction[]; period: Period };
 type HighlightListRow = MarketHighlight & { primary: string; secondary: string; tag?: string };
+
 type HolderChangeSummary = MajorIndividualHoldingSummary;
 type HolderScope = WatchlistScope | "market";
 type HoldingPage = { rows: HolderIncreaseRow[]; sourceDate: number | null; fetchedAt: string; partial?: boolean; fallback?: boolean; delivery?: HolderDelivery; sourceCompleteness?: string; nextCursor?: number | null; error?: string; warning?: string };
@@ -286,7 +291,7 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText }: {
 }) {
   return <article className="highlight-card">
     <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">{icon}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
-    <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{number === "۱" ? "ارزش" : number === "۲" ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{rows.map((row) => <tr key={row.symbol}>
+    <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{rows.map((row) => <tr key={row.symbol}>
       <td><span className="symbol-date-line"><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="row-date" aria-label={`تاریخ داده ${fmtDate(row.sessionDate)}`}>{fmtDate(row.sessionDate)}</small></span><small>{row.name}</small></td>
       <td><strong>{row.primary}</strong></td>
       <td><strong>{fp(row.priceLast)}</strong><small className={row.lastChangePct >= 0 ? "positive" : "negative"}>{pct(row.lastChangePct)}</small></td>
@@ -300,7 +305,7 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText }: {
 
 function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; emptyText: string }) {
   return <article className="highlight-card reversal-highlight-card">
-    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۴</span></header>
+    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۶</span></header>
     <div className="reversal-table-head" aria-hidden="true">
       <span>نماد</span><span>آخر (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span>
     </div>
@@ -311,6 +316,38 @@ function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; e
       <span className="reversal-value">{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}<small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></span>
     </li>)}</ol>
     {!rows.length && <div className="highlight-empty">{emptyText}</div>}
+  </article>;
+}
+
+function IndustryInflowCard({ number, title, subtitle, rows, loading, error, fetchedAt, emptyText, onRetry, sessions }: {
+  number: string;
+  title: string;
+  subtitle: string;
+  rows: IndustryRow[];
+  loading: boolean;
+  error: string;
+  fetchedAt: string;
+  emptyText: string;
+  onRetry?: () => void;
+  /** Recorded sessions summed into this card; omitted for a single session. */
+  sessions?: number;
+}) {
+  // The source reports Rial while the client's reference table is in Toman.
+  const toman = (rial: number | null) => rial === null ? "—" : `${faCompact.format(rial / 10)} تومان`;
+  return <article className="highlight-card">
+    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">⇧</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
+    <p className="holder-highlight-status">{sessions ? `۱۵ صنعت اول · جمع ${faI.format(sessions)} جلسه ثبت‌شده` : "۱۵ صنعت اول بر پایه خالص ورود پول حقیقی · ارقام از جمع صنعت در منبع داده"}{loading ? " · در حال بروزرسانی…" : ""}{fetchedAt ? ` · ${faDT.format(new Date(fetchedAt))}` : ""}</p>
+    <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr>
+      <th>صنعت</th><th>ورود پول (تومان)</th><th>ارزش معاملات (تومان)</th><th title={sessions ? "قدرت خرید اعلامی منبع برای آخرین جلسه؛ نسبت است و جمع زده نمی‌شود" : "قدرت خرید اعلامی منبع داده برای همین صنعت"}>قدرت خرید</th><th>نماد</th>
+    </tr></thead><tbody>{rows.map((row) => <tr key={`${row.code}-${row.name}`}>
+      <td><strong>{row.name}</strong></td>
+      <td><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"}>{toman(row.net)}</strong></td>
+      <td><strong>{toman(row.value)}</strong></td>
+      <td><strong dir="ltr">{row.buyPower === null ? "—" : faN.format(row.buyPower)}</strong></td>
+      <td><small>{faI.format(row.symbols)}</small></td>
+    </tr>)}</tbody></table></div>
+    {error && <p className="scan-error" role="alert">جمع صنعت‌ها دریافت نشد: {error}{onRetry && <button className="source-chip" type="button" disabled={loading} onClick={onRetry}>تلاش مجدد</button>}</p>}
+    {!rows.length && <div className="highlight-empty">{loading ? "در حال دریافت جمع صنعت‌ها از منبع…" : error || emptyText}</div>}
   </article>;
 }
 
@@ -401,6 +438,12 @@ export default function ScreenerClient() {
   const [highlightsUpdatedAt, setHighlightsUpdatedAt] = useState<Date | null>(null);
   const [highlightSessionDate, setHighlightSessionDate] = useState<number | null>(null);
   const [highlightClientTypeUnavailable, setHighlightClientTypeUnavailable] = useState(false);
+  const [industries, setIndustries] = useState<IndustryRow[]>([]);
+  const [industrySnapshots, setIndustrySnapshots] = useState<IndustrySnapshot[]>(() => readIndustrySnapshots());
+  const [industriesLoading, setIndustriesLoading] = useState(false);
+  const [industriesError, setIndustriesError] = useState("");
+  const [industriesFetchedAt, setIndustriesFetchedAt] = useState("");
+  const industriesRequested = useRef(false);
   const [highlightHoldings, setHighlightHoldings] = useState<HoldingPage | null>(null);
   const [highlightHoldingsLoading, setHighlightHoldingsLoading] = useState(false);
   const [highlightHoldingsError, setHighlightHoldingsError] = useState("");
@@ -910,6 +953,54 @@ export default function ScreenerClient() {
       // is temporarily unavailable. The compact column stays unknown.
     } finally {
       setPendingHolderChanges((count) => count - 1);
+    }
+  }
+
+  async function loadIndustries() {
+    setIndustriesLoading(true);
+    setIndustriesError("");
+    try {
+      // The browser's direct read is the same public feed the price path uses;
+      // the Worker route is the fallback when that read is blocked. A
+      // cache-busting query keeps this a simple CORS request: a Cache-Control
+      // header would force a preflight the data host does not answer.
+      const readDirectOnce = async () => {
+        const response = await fetchWithTimeout(`${INDUSTRY_SOURCE_URL}?_=${Date.now()}`, {
+          headers: { Accept: "application/json" },
+        }, 15_000);
+        if (!response.ok) throw new Error(`منبع صنایع HTTP ${response.status} برگرداند.`);
+        return parseIndustries(await response.json());
+      };
+      const readDirect = async () => {
+        try { return await readDirectOnce(); }
+        catch (error) {
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          return await readDirectOnce().catch(() => { throw error; });
+        }
+      };
+      const readWorker = async () => {
+        const response = await requestData("sector-map", {}, 25_000);
+        const body = await readApiJson<{ industries?: unknown; error?: string }>(response);
+        if (!response.ok) throw new Error(body.error || `Worker HTTP ${response.status}`);
+        return parseIndustries(body.industries);
+      };
+      let rows: IndustryRow[];
+      try { rows = await readDirect(); }
+      catch { rows = await readWorker(); }
+      setIndustries(rows);
+      setIndustriesFetchedAt(new Date().toISOString());
+      // One recorded session per market date, the raw material of the 3-day card.
+      const session = expectedDate();
+      setIndustrySnapshots((previous) => {
+        const next = upsertIndustrySnapshot(previous, session, rows);
+        writeIndustrySnapshots(next);
+        return next;
+      });
+    } catch (error) {
+      industriesRequested.current = false;
+      setIndustriesError(error instanceof Error ? error.message : "دریافت جمع صنعت‌ها ناموفق بود.");
+    } finally {
+      setIndustriesLoading(false);
     }
   }
 
@@ -1585,6 +1676,16 @@ export default function ScreenerClient() {
     return { values, volumes, realMoney, reversals, sessionDate: latest, rankedSymbols: sessionRows.length };
   }, [highlights]);
 
+  const topIndustries = useMemo(() => industries.slice(0, 15), [industries]);
+  const topIndustriesThreeDay = useMemo(() => sumIndustrySessions(industrySnapshots, 3).slice(0, 15), [industrySnapshots]);
+  const industrySessions = Math.min(3, industrySnapshots.length);
+
+  useEffect(() => {
+    if (activeTab !== "highlights" || industriesRequested.current) return;
+    industriesRequested.current = true;
+    void loadIndustries();
+  }, [activeTab]);
+
   // Holders grouped by SYMBOL for the card: one parent row per symbol with
   // every real-person record preserved as a separate child (client spec:
   // each person shown vertically underneath, never aggregated/deduplicated).
@@ -1644,7 +1745,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. چهار کارت معاملاتی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را به تفکیک صنعت (روزانه و جمع ۳ جلسه آخرِ ثبت‌شده) جمع می‌زنند و ۱۵ صنعت اول را مرتب می‌کنند؛ چهار کارت بعدی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -1655,12 +1756,14 @@ export default function ScreenerClient() {
       </div>
       <p className="partial-data-note" role="status">پوشش از {faI.format(coverage.requested)} نماد: قیمت تاریخ‌دار {faI.format(coverage.datedPrices)}، حجم {faI.format(coverage.volume)}، ارزش معاملات {faI.format(coverage.value)}، حجم حقیقی {faI.format(coverage.clientType)}، ارزش حقیقی {faI.format(coverage.realValues)}، کف مجاز {faI.format(coverage.floor)}؛ دریافت‌نشده {faI.format(coverage.unreceived)}، دادهٔ قبلی {faI.format(coverage.cached)}.</p>
       <div className="highlight-grid">
-        <HighlightCard number="۱" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
-        <HighlightCard number="۲" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
-        <HighlightCard number="۳" title="بیشترین ورود پول حقیقی" subtitle="خالص ارزش خرید حقیقی" icon="↗" rows={highlightGroups.realMoney} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
+        <IndustryInflowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
+        <IndustryInflowCard number="۲" title="ورود پول به صنعت (۳ روزه)" subtitle="جمع ۳ جلسه آخرِ ثبت‌شده برای هر صنعت" sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} emptyText="برای جمع ۳ روزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
+        <HighlightCard number="۳" title="بیشترین ورود پول حقیقی روزانه" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" rows={highlightGroups.realMoney} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
+        <HighlightCard number="۴" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
+        <HighlightCard number="۵" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
         <ReversalHighlightCard rows={highlightGroups.reversals} emptyText={emptyDataMessage("floor", coverage.floor, coverage.requested)} />
         <article className="highlight-card holder-highlight-card">
-          <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↗</span><div><h3>تغییرات سهامدار حقیقی</h3><p>هر ردیف یک سهامدار عمده حقیقی با افزایش سهم</p></div></div><span className="highlight-number">۵</span></header>
+          <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↗</span><div><h3>تغییرات سهامدار حقیقی</h3><p>هر ردیف یک سهامدار عمده حقیقی با افزایش سهم</p></div></div><span className="highlight-number">۷</span></header>
           <p className="holder-highlight-status">{highlightHoldingsLoading ? "در حال دریافت… " : ""}تاریخ تغییرات: {fmtDate(highlightHoldings?.sourceDate)}{highlightHoldings?.fallback ? " · داده پشتیبان" : ""}{highlightHoldings?.partial ? " · اسکن ناقص" : ""}{highlightHoldings?.fetchedAt ? ` · ${highlightHoldings.fallback ? "زمان ثبت نسخه پشتیبان" : "زمان دریافت"}: ${faDT.format(new Date(highlightHoldings.fetchedAt))}` : ""}</p>
           {!highlightHoldingsLoading && highlightHoldings?.partial && highlightHoldings.rows.length > 0 && <p className="partial-data-note">فعلاً {faI.format(groupHolderRowsBySymbol(highlightHoldings.rows).length)} نماد دارای افزایش تأییدشده دریافت شده است. چون دریافت ناقص بوده، این عدد تعداد کل افزایش‌ها در فهرست نیست.</p>}
           {highlightHoldings?.partial && highlightHoldings.warning && <p className="partial-data-note">{highlightHoldings.warning}</p>}
