@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { ownershipPresentation, type OwnershipValidation } from "./lib/holder-records";
 
-export function CopySymbol({ symbol }: { symbol: string }) {
+/** Generic copy control; `kind` labels what the value is (نماد، گروه، …). */
+export function CopyText({ value, kind }: { value: string; kind: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -13,17 +14,21 @@ export function CopySymbol({ symbol }: { symbol: string }) {
     return () => window.clearTimeout(timeout);
   }, [message]);
   return <span className="symbol-copy-control">
-    <button type="button" className="symbol-copy-button" aria-label={`کپی نماد ${symbol}`} title={`کپی نماد ${symbol}`} disabled={busy} onClick={async (event) => {
+    <button type="button" className="symbol-copy-button" aria-label={`کپی ${kind} ${value}`} title={`کپی ${kind} ${value}`} disabled={busy} onClick={async (event) => {
       event.stopPropagation(); setBusy(true); setMessage("");
       try {
         if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
-        await navigator.clipboard.writeText(symbol);
-        setMessage(`نماد ${symbol} کپی شد.`);
+        await navigator.clipboard.writeText(value);
+        setMessage(`${kind} ${value} کپی شد.`);
       } catch { setMessage("کپی انجام نشد؛ دسترسی کلیپ‌بورد مرورگر را بررسی کنید."); }
       finally { setBusy(false); }
     }}><span aria-hidden="true">⧉</span></button>
     <span className="copy-feedback" role="status">{message}</span>
   </span>;
+}
+
+export function CopySymbol({ symbol }: { symbol: string }) {
+  return <CopyText value={symbol} kind="نماد" />;
 }
 
 export function OwnershipValue({ row }: { row: { ownershipPct: number | null; ownership?: OwnershipValidation } }) {

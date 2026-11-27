@@ -546,12 +546,14 @@ export function summarizeMajorIndividualHoldingChanges(changes: MajorIndividualH
 }
 
 /** Compare last trade with the SAME session's closing price, never with
- * yesterday's close. Keep the rial gap separate from the percent gap. */
+ * yesterday's close, from the buyer's side: buying at the last trade and
+ * settling at the close is a loss when the close is below the last trade, so
+ * that case is negative. Keep the rial gap separate from the percent gap. */
 export function closingPriceGap(priceLast: number, priceClose: number): { rial: number; percent: number } | null {
   if (![priceLast, priceClose].every((value) => Number.isFinite(value) && value > 0)) return null;
   return {
-    rial: round(priceLast - priceClose, 2),
-    percent: round(((priceLast - priceClose) / priceClose) * 100, 2),
+    rial: round(priceClose - priceLast, 2),
+    percent: round(((priceClose - priceLast) / priceLast) * 100, 2),
   };
 }
 
@@ -620,7 +622,7 @@ export function marketHighlightFromInstrument(
     lastChangePct: pctFromYesterday(priceLast),
     closeChangePct: pctFromYesterday(priceClose),
     // Unlike the two day-on-day change labels, this compares prices with the
-    // SAME session's close. Denominator is today's close, not yesterday's.
+    // SAME session's close. Denominator is the last trade price, not yesterday's.
     lastCloseGapPct: closingPriceGap(priceLast, priceClose)?.percent ?? 0,
     reversalPct: priceMin > 0 ? round(((priceLast - priceMin) / priceMin) * 100, 2) : 0,
     touchedSellQueue: allowedMin > 0 && priceMin > 0 && Math.abs(priceMin - allowedMin) < 0.5,

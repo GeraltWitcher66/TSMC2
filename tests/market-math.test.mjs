@@ -210,7 +210,7 @@ test("builds list-only market highlights and detects negative-to-positive revers
   assert.equal(row.minChangePct, -5);
   assert.equal(row.lastChangePct, 3);
   assert.equal(row.closeChangePct, 1);
-  assert.equal(row.lastCloseGapPct, 1.98);
+  assert.equal(row.lastCloseGapPct, -1.94);
   assert.equal(row.reversalPct, 8.42);
   assert.equal(row.touchedSellQueue, true);
   assert.equal(row.realBuyVolume, 3_000_000);
@@ -237,14 +237,17 @@ test("enriches a Zarvan highlight with browser-fetched TSETMC client types", () 
   assert.equal(enriched.clientTypeAvailable, true);
 });
 
-test("uses today's closing price as the denominator for the last-minus-close gap", () => {
+test("the last-trade-to-close gap is measured from the buyer's side", () => {
   const row = marketHighlightFromInstrument({ Symbol: "کیا", PriceYesterday: 10000, PriceLast: 10268, PriceClose: 9708 });
   assert.equal(row.lastChangePct, 2.68);
   assert.equal(row.closeChangePct, -2.92);
-  assert.deepEqual(closingPriceGap(10268, 9708), { rial: 560, percent: 5.77 });
-  assert.equal(row.lastCloseGapPct, 5.77);
-  assert.deepEqual(closingPriceGap(950, 1000), { rial: -50, percent: -5 });
+  // Buying at 10268 and settling at 9708 loses 560 Rial, i.e. 5.45% of the price paid.
+  assert.deepEqual(closingPriceGap(10268, 9708), { rial: -560, percent: -5.45 });
+  assert.equal(row.lastCloseGapPct, -5.45);
+  assert.deepEqual(closingPriceGap(950, 1000), { rial: 50, percent: 5.26 });
   assert.deepEqual(closingPriceGap(1000, 1000), { rial: 0, percent: 0 });
+  // کسرا: last trade 2463, close 2457 — the close is lower, so the gap is red.
+  assert.deepEqual(closingPriceGap(2463, 2457), { rial: -6, percent: -0.24 });
   assert.equal(closingPriceGap(1000, 0), null);
 });
 
@@ -268,7 +271,7 @@ test("requires sell-queue floor, positive last and negative closing for the reve
   const exact = build();
   assert.ok(exact);
   assert.equal(exact.closeChangePct, -1.5);
-  assert.equal(exact.lastCloseGapPct, 3.55);
+  assert.equal(exact.lastCloseGapPct, -3.43);
   assert.equal(isSellQueueToPositive(exact), true);
 
   const neverQueued = build({ PriceMin: 980 });

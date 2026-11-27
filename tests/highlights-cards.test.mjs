@@ -63,6 +63,16 @@ test("the tab renders the eight cards in the requested order", () => {
   assert.ok(clientSource.includes('<span className="highlight-number">۸</span>'), "reversal card is numbered ۸");
 });
 
+test("every highlight row offers the copy button, industry groups included", () => {
+  const industryCard = clientSource.slice(
+    clientSource.indexOf("function IndustryFlowCard"),
+    clientSource.indexOf("const parseTxtSymbols"),
+  );
+  assert.ok(industryCard.includes('<CopyText value={row.name} kind="گروه" />'), "industry cards 1 and 2 copy the group name");
+  assert.ok(industryCard.includes("hl-group-line"), "the industry copy button sits on the name line");
+  assert.ok(clientSource.includes('<CopySymbol symbol={row.symbol} />'), "symbol cards keep their copy button");
+});
+
 test("card 3 keeps only legal major shareholders by name, while the individual flow stays individual", () => {
   const payload = {
     dates: [20260928, 20260929],
@@ -160,6 +170,14 @@ test("card 3 columns: symbol, holder, change, value, then the shared price colum
     assert.ok(at > cursor, `price column ${label} keeps its place`);
     cursor = at;
   }
+});
+
+test("ranked cards 3–5 show the day change under both price columns", () => {
+  const cells = clientSource.match(/function rankPriceCells[\s\S]*?\n}/);
+  assert.ok(cells, "shared price cells found");
+  assert.ok(cells[0].includes("priceChange(row.lastChangePct)"), "the last-trade price keeps its day change");
+  assert.ok(cells[0].includes("priceChange(row.closeChangePct)"), "the closing price keeps its day change");
+  assert.ok(cells[0].includes("<span className=\"rank-price\">"), "both prices use the two-line cell");
 });
 
 test("cards 4 and 5 dropped the price-change column and share the real-money columns", () => {

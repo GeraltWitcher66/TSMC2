@@ -7,7 +7,7 @@ import { requestData } from "./lib/data-client";
 import { inspectWorkerEdgeResponse, ScreenerWorkerCircuitBreaker } from "./lib/worker-edge-diagnostics";
 import { defaultSymbols, normalizeSymbol } from "./default-symbols";
 import DivergenceDetails from "./DivergenceDetails";
-import { CopySymbol, OwnershipValue } from "./HolderControls";
+import { CopySymbol, CopyText, OwnershipValue } from "./HolderControls";
 import type { OwnershipValidation } from "./lib/holder-records";
 import { holderFreshnessText, type HolderDelivery } from "./lib/holder-freshness";
 import { browserMarket } from "./lib/browser-market";
@@ -304,6 +304,13 @@ function SkeletonRows({ columns }: { columns: number }) {
   </tr>)}</>;
 }
 
+/** Closing gap cell: buying at the last trade and settling at the close.
+ * A close below the last trade is a loss, so that row turns red. */
+function closingGapCell(row: MarketHighlight) {
+  const gap = closingPriceGap(row.priceLast, row.priceClose);
+  return <><strong dir="ltr" className={gap === null ? "muted" : gap.percent >= 0 ? "positive" : "negative"}>{pct(gap?.percent)}</strong><small>{fp(gap?.rial)} ریال</small></>;
+}
+
 function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progress, loading }: {
   number: string;
   title: string;
@@ -319,12 +326,12 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progres
   return <article className="highlight-card hl-card">
     <header className="hl-head"><div className="hl-head-main"><span className="highlight-number">{number}</span><span className="highlight-icon hl-icon" aria-hidden="true">{icon}</span><div className="hl-head-text"><h3 title={title}>{title}</h3><p title={subtitle}>{subtitle}</p></div></div></header>
     {progress && <div className="hl-progress" role="status"><span className="hl-progress-bar hl-progress-bar--busy" /><p>{progress}</p></div>}
-    <div className="table-wrap highlight-table hl-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{loading && !rows.length ? <SkeletonRows columns={6} /> : rows.map((row) => <tr key={row.symbol}>
+    <div className="table-wrap highlight-table hl-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف پایانی همان روز با آخرین معامله: (پایانی − آخرین معامله) ÷ آخرین معامله × ۱۰۰؛ خرید در آخرین معامله وقتی پایانی کمتر است ضرر می‌کند و عدد قرمز می‌شود.">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{loading && !rows.length ? <SkeletonRows columns={6} /> : rows.map((row) => <tr key={row.symbol}>
       <td><span className="symbol-date-line"><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="row-date" aria-label={`تاریخ داده ${rowDate(row)}`}>{rowDate(row)}</small></span><small>{row.name}</small></td>
       <td className="hl-primary"><strong dir="ltr">{row.primary}</strong>{row.coverageLabel && <small className="weekly-coverage">{row.coverageLabel}</small>}</td>
       <td><strong dir="ltr">{fp(row.priceLast)}</strong><small className={row.lastChangePct >= 0 ? "positive" : "negative"}>{pct(row.lastChangePct)}</small></td>
       <td><strong dir="ltr">{fp(row.priceClose)}</strong><small className={row.closeChangePct >= 0 ? "positive" : "negative"}>{pct(row.closeChangePct)}</small></td>
-      <td><strong dir="ltr" className={row.priceLast >= row.priceClose ? "positive" : "negative"}>{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}</strong><small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></td>
+      <td>{closingGapCell(row)}</td>
       <td><small className="row-date">{rowDate(row)}</small></td>
     </tr>)}</tbody></table></div>
     {!rows.length && !loading && <div className="highlight-empty hl-empty">{emptyText}</div>}
@@ -335,13 +342,13 @@ function ReversalHighlightCard({ rows, emptyText, loading }: { rows: MarketHighl
   return <article className="highlight-card hl-card reversal-highlight-card hl-reversal hl-card--wide">
     <header className="hl-head"><div className="hl-head-main"><span className="highlight-number">۸</span><span className="highlight-icon hl-icon" aria-hidden="true">↺</span><div className="hl-head-text"><h3 title="از صف فروش به مثبت">از صف فروش به مثبت</h3><p title="لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی">لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div></header>
     <div className="reversal-table-head hl-reversal-head">
-      <span>نماد</span><span>آخرین معامله (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span><span>تاریخ</span>
+      <span>نماد</span><span>آخرین معامله (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف پایانی همان روز با آخرین معامله: (پایانی − آخرین معامله) ÷ آخرین معامله × ۱۰۰؛ خرید در آخرین معامله وقتی پایانی کمتر است ضرر می‌کند و عدد قرمز می‌شود.">اختلاف (%)</span><span>تاریخ</span>
     </div>
     <ol className="hl-reversal-list">{rows.map((row) => <li key={row.symbol}>
       <span className="reversal-symbol" title={`کمترین معامله ${fp(row.priceMin)} · کف مجاز ${fp(row.allowedMin)}`}><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /></span>
       <span className="reversal-value"><strong dir="ltr">{fp(row.priceLast)}</strong><small className="positive">{pct(row.lastChangePct)}</small></span>
       <span className="reversal-value"><strong dir="ltr">{fp(row.priceClose)}</strong><small className="negative">{pct(row.closeChangePct)}</small></span>
-      <span className="reversal-value" dir="ltr">{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}<small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></span>
+      <span className="reversal-value" dir="ltr">{closingGapCell(row)}</span>
       <span className="reversal-date">{fmtDate(row.sessionDate)}</span>
     </li>)}</ol>
     {!rows.length && (loading
@@ -356,7 +363,7 @@ type RankedRow = { key: string; sort: Record<string, number | string | null>; ce
 const rankPriceColumns: RankedColumn[] = [
   { key: "last", label: "آخرین معامله (ریال)" },
   { key: "close", label: "پایانی (ریال)" },
-  { key: "gap", label: "اختلاف (%)", title: "اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰" },
+  { key: "gap", label: "اختلاف (%)", title: "اختلاف پایانی همان روز با آخرین معامله: (پایانی − آخرین معامله) ÷ آخرین معامله × ۱۰۰؛ خرید در آخرین معامله وقتی پایانی کمتر است ضرر می‌کند و عدد قرمز می‌شود." },
   { key: "date", label: "تاریخ" },
 ];
 
@@ -390,10 +397,12 @@ const rankSymbolCell = (row: MarketHighlight) => (
 function rankPriceCells(row: MarketHighlight, date?: number | null) {
   const gap = closingPriceGap(row.priceLast, row.priceClose);
   const sessionDate = date ?? row.sessionDate ?? null;
+  // Same day-change line the ranked list cards show under the two prices.
+  const priceChange = (value: number) => <small className={value >= 0 ? "positive" : "negative"}>{pct(value)}</small>;
   return {
     cells: {
-      last: <strong>{fp(row.priceLast)}</strong>,
-      close: <strong>{fp(row.priceClose)}</strong>,
+      last: <span className="rank-price"><strong>{fp(row.priceLast)}</strong>{priceChange(row.lastChangePct)}</span>,
+      close: <span className="rank-price"><strong>{fp(row.priceClose)}</strong>{priceChange(row.closeChangePct)}</span>,
       gap: <strong className={gap === null ? "muted" : gap.percent >= 0 ? "positive" : "negative"}>{pct(gap?.percent)}</strong>,
       date: <span className="row-date">{fmtDate(sessionDate)}</span>,
     },
@@ -537,7 +546,7 @@ function IndustryFlowCard({ number, title, subtitle, rows, loading, error, fetch
       <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("value")}>ارزش معاملات (تومان){caret("value")}</button></th>
       <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("buyPower")}>قدرت خرید{caret("buyPower")}</button></th>
     </tr></thead><tbody>{loading && !shown.length ? <SkeletonRows columns={4} /> : shown.map((row) => <tr key={`${row.code}-${row.name}`}>
-      <td><strong className="hl-clamp" title={row.name}>{shortIndustryName(row.name)}</strong><small>{faI.format(row.symbols)} نماد</small></td>
+      <td><span className="hl-group-line"><strong className="hl-clamp" title={row.name}>{shortIndustryName(row.name)}</strong><CopyText value={row.name} kind="گروه" /></span><small>{faI.format(row.symbols)} نماد</small></td>
       <td className="hl-primary"><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"} dir="ltr">{compactToman(row.net)}</strong></td>
       <td><strong dir="ltr">{compactToman(row.value)}</strong></td>
       <td><strong dir="ltr" className={row.buyPower === null ? "muted" : row.buyPower >= 1 ? "positive" : "negative"}>{rating(row.buyPower)}</strong></td>
@@ -1986,7 +1995,9 @@ export default function ScreenerClient() {
     }));
     const reversals = [...sessionRows]
       .filter(isSellQueueToPositive)
-      .sort((a, b) => (closingPriceGap(b.priceLast, b.priceClose)?.percent ?? 0) - (closingPriceGap(a.priceLast, a.priceClose)?.percent ?? 0))
+      // The gap is now negative for a drop from the last trade to the close, so
+      // ascending order still puts the sharpest drop first.
+      .sort((a, b) => (closingPriceGap(a.priceLast, a.priceClose)?.percent ?? 0) - (closingPriceGap(b.priceLast, b.priceClose)?.percent ?? 0))
       .slice(0, 10);
     return { values, volumes, reversals, sessionRows, sessionDate: latest, rankedSymbols: sessionRows.length };
   }, [highlights]);
