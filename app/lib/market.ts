@@ -380,25 +380,59 @@ export type MajorHolderChange = {
   date: number;
 };
 
+/** The next ordinary equity session (Saturday–Wednesday) after a dated one. */
+function nextEquitySessionAfter(session: number): number | null {
+  const s = String(session);
+  if (!/^\d{8}$/.test(s)) return null;
+  const day = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}T00:00:00Z`);
+  if (!Number.isFinite(day.getTime())) return null;
+  for (let i = 0; i < 10; i++) {
+    day.setUTCDate(day.getUTCDate() + 1);
+    const weekday = day.getUTCDay();
+    if (weekday !== 4 && weekday !== 5) {
+      return day.getUTCFullYear() * 10000 + (day.getUTCMonth() + 1) * 100 + day.getUTCDate();
+    }
+  }
+  return null;
+}
+
 /**
  * Extract confirmed signed changes from TSETMC's whole-market, five-session
  * shareholder-change dataset. A missing/zero prior snapshot is accepted only
  * when the upstream record itself supplies a reliable non-zero share change.
  * `accept` decides which shareholders are kept, so the individual-only flow
  * and the all-major-holders flow share exactly one implementation.
+ *
+ * `latestPublishedRegister` makes the comparison follow the official site:
+ * TSETMC keeps the register it publishes after a session in the next
+ * (pre-created) session column, and its own change column compares the two
+ * newest published registers. Without it the row is one registration behind.
+ * The change is still reported on the last closed session, which is the
+ * session whose trading the newest published register describes.
  */
 function extractHolderChanges(
   payload: unknown,
   options: { now?: Date },
   accept: (holderName: string) => boolean,
+  latestPublishedRegister = false,
 ): MajorHolderChange[] {
   const root = payload as Record<string, unknown> | null;
   const dates = Array.isArray(root?.dates) ? root.dates.map(Number) : [];
   const holders = Array.isArray(root?.shareHoldersChanges) ? root.shareHoldersChanges : [];
   const dayKeys = ["firstDay", "secondDay", "thirdDay", "fourthDay", "fifthDay"] as const;
-  const selection = selectHolderSession(dates.slice(0, dayKeys.length), options.now);
-  const lastIndex = selection.index, previousIndex = selection.previousIndex;
+  const window = dates.slice(0, dayKeys.length);
+  const selection = selectHolderSession(window, options.now);
+  let lastIndex = selection.index, previousIndex = selection.previousIndex;
   if (lastIndex < 1 || previousIndex < 0) return [];
+  // Only a slot dated exactly one ordinary session later can carry that
+  // publication; Thursday/Friday placeholders and odd gaps stay excluded.
+  const publishedIndex = lastIndex < window.length - 1 && nextEquitySessionAfter(window[lastIndex]) === window[window.length - 1]
+    ? window.length - 1
+    : -1;
+  if (latestPublishedRegister && publishedIndex > lastIndex) {
+    previousIndex = lastIndex;
+    lastIndex = publishedIndex;
+  }
 
   const result: MajorHolderChange[] = [];
   const seen = new Set<string>();
@@ -410,12 +444,22 @@ function extractHolderChanges(
     for (const rawInstrument of instruments) {
       const instrument = rawInstrument as Record<string, unknown>;
       const insCode = String(instrument.insCode ?? "").trim();
-      const previousValue = instrument[dayKeys[previousIndex]];
+      // A holder that the newest publication does not cover yet keeps the
+      // confirmed pair of the selected session instead of disappearing.
+      let currentIndex = lastIndex, priorIndex = previousIndex;
+      if (lastIndex !== selection.index) {
+        const newestRaw = instrument[dayKeys[lastIndex]];
+        if (newestRaw === undefined || newestRaw === null || newestRaw === "" || !Number.isFinite(Number(newestRaw))) {
+          currentIndex = selection.index;
+          priorIndex = selection.previousIndex;
+        }
+      }
+      const previousValue = instrument[dayKeys[priorIndex]];
       const parsedPrevious = Number(previousValue);
       const previousShares = previousValue === undefined || previousValue === null || previousValue === "" || !Number.isFinite(parsedPrevious)
         ? null
         : parsedPrevious;
-      const currentValue = instrument[dayKeys[lastIndex]];
+      const currentValue = instrument[dayKeys[currentIndex]];
       if (currentValue === undefined || currentValue === null || currentValue === "") continue;
       const currentShares = Number(currentValue);
       if (!insCode || !Number.isFinite(currentShares) || currentShares < 0) continue;
@@ -431,7 +475,7 @@ function extractHolderChanges(
         changeShares = officialChange;
         changeEvidence = "official";
       }
-      const date = dates[lastIndex];
+      const date = selection.sourceDate ?? dates[currentIndex];
       const sourceHolderId = String(holder.id ?? holder.shareHolderId ?? holder.code ?? "").trim();
       // Anonymous records with equal holdings can be different people. Only
       // a source identity is sufficient evidence for cross-record deduplication.
@@ -459,7 +503,9 @@ function extractHolderChanges(
  * Individual ("شخص حقیقی") records belong to the individual-only flow.
  */
 export function extractMajorHolderChanges(payload: unknown, options: { now?: Date } = {}): MajorHolderChange[] {
-  return extractHolderChanges(payload, options, (holderName) => normalizeHolderIdentity(holderName) !== normalizeHolderIdentity("شخص حقیقی"));
+  // Card 3 shows the same change the official site's shareholder table shows,
+  // so it reads the two newest published registers instead of lagging one.
+  return extractHolderChanges(payload, options, (holderName) => normalizeHolderIdentity(holderName) !== normalizeHolderIdentity("شخص حقیقی"), true);
 }
 
 export function extractMajorIndividualHoldingChanges(payload: unknown, options: { now?: Date } = {}): MajorIndividualHoldingChange[] {

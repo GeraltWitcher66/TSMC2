@@ -84,6 +84,30 @@ test("card 3 keeps only legal major shareholders by name, while the individual f
   assert.ok(!("holderName" in individuals[0]), "individual rows keep their previous shape");
 });
 
+test("card 3 compares the two newest published registers, like the official site", () => {
+  // TSETMC keeps the register it publishes after Wednesday's session in the
+  // next (pre-created) Saturday column; its own change column shows
+  // fifthDay − fourthDay, so the card must not stop at fourthDay − thirdDay.
+  const instrument = {
+    insCode: "51346017122365212", name: "بیمه زندگی کاریزما",
+    firstDay: 348_038_166, secondDay: 348_355_000, thirdDay: 349_077_314, fourthDay: 351_428_438, fifthDay: 352_450_520,
+  };
+  const payload = {
+    dates: [20261122, 20261123, 20261124, 20261125, 20261128],
+    shareHoldersChanges: [
+      { id: "bfm", name: "BFMصندوق سرمایه گذاری .ا.بازارگردانی کارون", insList: [instrument] },
+      { id: "person", name: "شخص حقیقی", insList: [{ ...instrument }] },
+    ],
+  };
+  const now = new Date("2026-11-27T18:30:00Z"); // Friday 22:00 Tehran, last closed session Wed 25
+  const major = extractMajorHolderChanges(payload, { now });
+  assert.deepEqual(major.map((row) => [row.date, row.previousShares, row.currentShares, row.changeShares]),
+    [[20261125, 351_428_438, 352_450_520, 1_022_082]], "the newest official publication is compared and dated to the closed session");
+  const individuals = extractMajorIndividualHoldingChanges(payload, { now });
+  assert.deepEqual(individuals.map((row) => [row.date, row.changeShares]), [[20261125, 2_351_124]],
+    "the individual flow keeps its confirmed consecutive-session pair");
+});
+
 test("card 3 groups the named major holders of one symbol into a single row", () => {
   assert.ok(panel.includes("سهامداران عمده حقوقی هر نماد، گروه‌بندی‌شده بر اساس نماد"), "card 3 subtitle describes the symbol grouping");
   assert.ok(panel.includes("هر ردیف یک نماد است"), "the help box explains the symbol grouping");

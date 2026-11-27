@@ -378,7 +378,10 @@ const REAL_MONEY_COLUMNS: RankedColumn[] = [
 
 const rankSymbolCell = (row: MarketHighlight) => (
   <span className="rank-symbol">
-    <a className="rank-symbol-link" href={`https://tsetmc.com/instInfo/${encodeURIComponent(row.insCode)}`} target="_blank" rel="noopener noreferrer">{row.symbol}</a>
+    <span className="rank-symbol-line">
+      <a className="rank-symbol-link" href={`https://tsetmc.com/instInfo/${encodeURIComponent(row.insCode)}`} target="_blank" rel="noopener noreferrer">{row.symbol}</a>
+      <CopySymbol symbol={row.symbol} />
+    </span>
     {row.name && <small>{row.name}</small>}
   </span>
 );
@@ -2209,7 +2212,7 @@ export default function ScreenerClient() {
         <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده حقوقی هر نماد، گروه‌بندی‌شده بر اساس نماد" icon="↕" wide loading={highlightHoldingsLoading} columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
           "ارزش تغییر = تغییر تعداد سهم × قیمت پایانی همان جلسه ÷ ۱۰ (واحد: تومان).",
           "هر ردیف یک نماد است؛ اگر چند سهامدار عمده حقوقی در آن نماد تغییر کرده باشند، همه در ستون «سهامداران» با تغییر خودشان فهرست می‌شوند و ستون‌های تغییرات و ارزش جمع همان نماد را نشان می‌دهند. کاهش‌ها قرمز نمایش داده می‌شوند.",
-          "منبع، تغییرات سهامداران عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
+          "منبع، تغییرات سهامداران عمده را برای پنج جلسه آخر منتشر می‌کند. این کارت دو آخرین ثبت منتشرشده سهامداران را مقایسه می‌کند (همان عددی که سایت بورس در ستون تغییرات نشان می‌دهد) و تغییر را با قیمت پایانی آخرین جلسه بسته‌شده ارزش‌گذاری می‌کند.",
         ]} error={highlightHoldingsError} status={`${highlightHoldingsLoading ? "در حال دریافت… · " : ""}تاریخ تغییرات: ${fmtDate(highlightHoldings?.sourceDate)}${highlightHoldings?.fallback ? " · داده پشتیبان" : ""}${highlightHoldings?.partial ? " · اسکن ناقص" : ""}`} emptyText={highlightHoldingsLoading ? "در حال دریافت تغییرات سهامداران…" : "داده تغییرات سهامداران برای این فهرست در دسترس نیست."} />
         <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" loading={highlightsLoading} help={[
           "ورود پول = ارزش خرید حقیقی − ارزش فروش حقیقی همان جلسه (تومان).",
