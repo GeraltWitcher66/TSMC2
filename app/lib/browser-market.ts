@@ -1,6 +1,6 @@
 import { fetchWithTimeout } from "./request-lifecycle";
 import { relayUrl } from "./data-client";
-import { extractMajorIndividualHoldingChanges, extractMajorIndividualHoldingIncreases, normalizeSymbol, summarizeMajorIndividualHoldingChanges, toApiSymbol } from "./market";
+import { extractMajorHolderChanges, extractMajorIndividualHoldingChanges, extractMajorIndividualHoldingIncreases, normalizeSymbol, summarizeMajorIndividualHoldingChanges, toApiSymbol } from "./market";
 import { mapWithConcurrency, RequestCoalescer } from "./data-reliability";
 import { bindInstrumentInfo, enrichHolding, unresolvedHolding, type HolderIncreaseRow, type InstrumentInfo } from "./holder-records";
 import { holderSessionCoverage } from "./market-session";
@@ -108,6 +108,13 @@ export function createBrowserMarketClient(request: typeof fetch = fetch) {
     const byCode = new Map(infos);
     let recoveredRows = 0;
     let unresolvedRows = 0;
+    // Card 3 needs every major shareholder (individual and legal) by name; it
+    // reuses this payload and the code→symbol map instead of a new request.
+    const majorHolders = extractMajorHolderChanges(payload).flatMap((change) => {
+      const symbol = symbolsByCode.get(change.insCode);
+      if (!symbol || (requested && !requested.has(symbol)) || symbol.endsWith("ح") || /\d+$/.test(symbol)) return [];
+      return [{ ...change, symbol }];
+    });
     const rows: HolderIncreaseRow[] = candidates.flatMap((candidate) => {
       const info = byCode.get(candidate.insCode);
       let row = info ? enrichHolding(candidate, info) : null;
@@ -118,7 +125,7 @@ export function createBrowserMarketClient(request: typeof fetch = fetch) {
       if (!row && !info) unresolvedRows++;
       return row && (!requested || requested.has(row.symbol)) ? [row] : [];
     });
-    return { rows: rows.sort((a, b) => b.changeShares - a.changeShares), sourceDate: date, fetchedAt, delivery, partial: missingCount > 0 || lookupFailures > 0 || failedInfo > 0 || recoveredRows > 0 || unresolvedRows > 0 || !holderSessionCoverage(payload).completeForSelectedSession || holderSourceAgeDays(date) > 7, sourceCompleteness: holderSessionCoverage(payload).completeForSelectedSession ? "selected-session" : "earlier-session-subset", fallback: false };
+    return { rows: rows.sort((a, b) => b.changeShares - a.changeShares), majorHolders, sourceDate: date, fetchedAt, delivery, partial: missingCount > 0 || lookupFailures > 0 || failedInfo > 0 || recoveredRows > 0 || unresolvedRows > 0 || !holderSessionCoverage(payload).completeForSelectedSession || holderSourceAgeDays(date) > 7, sourceCompleteness: holderSessionCoverage(payload).completeForSelectedSession ? "selected-session" : "earlier-session-subset", fallback: false };
   }
   return { holders, summaries };
 }

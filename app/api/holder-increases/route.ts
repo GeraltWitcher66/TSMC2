@@ -1,7 +1,7 @@
 import {
-  extractMajorIndividualHoldingChanges, extractMajorIndividualHoldingIncreases,
+  extractMajorHolderChanges, extractMajorIndividualHoldingChanges, extractMajorIndividualHoldingIncreases,
   normalizeSymbol, summarizeMajorIndividualHoldingChanges, toApiSymbol,
-  type MajorIndividualHoldingSummary,
+  type MajorHolderChange, type MajorIndividualHoldingSummary,
 } from "../../lib/market";
 import { mapWithConcurrency, RequestCoalescer } from "../../lib/data-reliability";
 import { loadVerifiedHolderSnapshot } from "../../data/holder-snapshot";
@@ -153,6 +153,13 @@ async function rowPage(cursor: number, symbols?: string[], expectedDate?: number
     let unresolvedRows = 0;
     let excludedRows = 0;
     const requested = symbols ? new Set(symbols) : null;
+    // Card 3 ranks every major shareholder by name, using the payload this page
+    // already fetched: no extra upstream request is issued for it.
+    const majorHolders = symbols ? extractMajorHolderChanges(payload).flatMap((change): Array<MajorHolderChange & { symbol: string }> => {
+      const symbol = symbolsByCode.get(change.insCode);
+      if (!symbol || !requested?.has(symbol) || symbol.endsWith("ح") || /\d+$/.test(symbol)) return [];
+      return [{ ...change, symbol }];
+    }) : [];
     const rows: HolderIncreaseRow[] = pageCandidates.flatMap((candidate) => {
       const info = byCode.get(candidate.insCode);
       let row = enrichHolding(candidate, info);
@@ -169,7 +176,7 @@ async function rowPage(cursor: number, symbols?: string[], expectedDate?: number
       return [];
     });
     const metadataUnavailable = pageCodes.length > 0 && failedInfo === pageCodes.length;
-    return Response.json({ rows, sourceDate: date, fetchedAt, servedAt: provenance.servedAt, delivery, fallback: false, source: "TSETMC Shareholder Changes", provenance,
+    return Response.json({ rows, majorHolders, sourceDate: date, fetchedAt, servedAt: provenance.servedAt, delivery, fallback: false, source: "TSETMC Shareholder Changes", provenance,
       partial: failedInfo > 0 || missingCount > 0 || lookupFailures > 0 || recoveredRows > 0 || unresolvedRows > 0 || !currentCoverage || sourceAgeDays > 7, failedInfo, missingCount, lookupFailures,
       sourcePositiveRecords, scopedPositiveRecords: candidates.length, pagePositiveRecords: pageCandidates.length, recoveredRows, unresolvedRows, excludedRows,
       warning: [historicalWarning, unconfirmedSessionWarning, recoveredRows ? `${recoveredRows} رکورد تغییر مثبت با شناسه نماد تأییدشده و بدون مشخصات تکمیلی حفظ شد؛ بازار و درصد مالکیت آن‌ها نامشخص است.` : "", metadataUnavailable ? "مشخصات رسمی ابزارهای این صفحه در دسترس نیست." : "", missingCount ? `${missingCount} نماد از فهرست در نگاشت منبع تکمیلی شناسایی نشد؛ نبود ردیف به معنای نبود خرید نیست.` : "", unresolvedRows ? `${unresolvedRows} رکورد مثبت بدون شناسه قابل‌تأیید نمایش داده نشد.` : ""].filter(Boolean).join(" ") || undefined,

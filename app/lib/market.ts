@@ -367,12 +367,31 @@ function officialHolderChange(instrument: Record<string, unknown>) {
   return null;
 }
 
+export type MajorHolderChange = {
+  id: string;
+  insCode: string;
+  instrumentName: string;
+  /** Normalized source name; legal entities keep their own registered name. */
+  holderName: string;
+  previousShares: number | null;
+  currentShares: number;
+  changeShares: number;
+  changeEvidence: "snapshot" | "official";
+  date: number;
+};
+
 /**
  * Extract confirmed signed changes from TSETMC's whole-market, five-session
  * shareholder-change dataset. A missing/zero prior snapshot is accepted only
  * when the upstream record itself supplies a reliable non-zero share change.
+ * `accept` decides which shareholders are kept, so the individual-only flow
+ * and the all-major-holders flow share exactly one implementation.
  */
-export function extractMajorIndividualHoldingChanges(payload: unknown, options: { now?: Date } = {}): MajorIndividualHoldingChange[] {
+function extractHolderChanges(
+  payload: unknown,
+  options: { now?: Date },
+  accept: (holderName: string) => boolean,
+): MajorHolderChange[] {
   const root = payload as Record<string, unknown> | null;
   const dates = Array.isArray(root?.dates) ? root.dates.map(Number) : [];
   const holders = Array.isArray(root?.shareHoldersChanges) ? root.shareHoldersChanges : [];
@@ -381,11 +400,12 @@ export function extractMajorIndividualHoldingChanges(payload: unknown, options: 
   const lastIndex = selection.index, previousIndex = selection.previousIndex;
   if (lastIndex < 1 || previousIndex < 0) return [];
 
-  const result: MajorIndividualHoldingChange[] = [];
+  const result: MajorHolderChange[] = [];
   const seen = new Set<string>();
   for (const [holderIndex, rawHolder] of holders.entries()) {
     const holder = rawHolder as Record<string, unknown>;
-    if (normalizeHolderIdentity(String(holder.name ?? "")) !== "شخصحقیقی") continue;
+    const holderName = normalizeSymbol(String(holder.name ?? ""));
+    if (!holderName || !accept(holderName)) continue;
     const instruments = Array.isArray(holder.insList) ? holder.insList : [];
     for (const rawInstrument of instruments) {
       const instrument = rawInstrument as Record<string, unknown>;
@@ -400,7 +420,7 @@ export function extractMajorIndividualHoldingChanges(payload: unknown, options: 
       const currentShares = Number(currentValue);
       if (!insCode || !Number.isFinite(currentShares) || currentShares < 0) continue;
       let changeShares: number;
-      let changeEvidence: MajorIndividualHoldingChange["changeEvidence"];
+      let changeEvidence: MajorHolderChange["changeEvidence"];
       if (previousShares !== null && previousShares > 0) {
         if (currentShares === previousShares) continue;
         changeShares = currentShares - previousShares;
@@ -422,7 +442,7 @@ export function extractMajorIndividualHoldingChanges(payload: unknown, options: 
         id,
         insCode,
         instrumentName: normalizeSymbol(String(instrument.name ?? "")),
-        shareholderType: "شخص حقیقی",
+        holderName,
         previousShares,
         currentShares,
         changeShares,
@@ -432,6 +452,26 @@ export function extractMajorIndividualHoldingChanges(payload: unknown, options: 
     }
   }
   return result.sort((a, b) => Math.abs(b.changeShares) - Math.abs(a.changeShares) || a.instrumentName.localeCompare(b.instrumentName, "fa"));
+}
+
+/** Every major shareholder (individual or legal), with its real name. */
+export function extractMajorHolderChanges(payload: unknown, options: { now?: Date } = {}): MajorHolderChange[] {
+  return extractHolderChanges(payload, options, () => true);
+}
+
+export function extractMajorIndividualHoldingChanges(payload: unknown, options: { now?: Date } = {}): MajorIndividualHoldingChange[] {
+  return extractHolderChanges(payload, options, (holderName) => normalizeHolderIdentity(holderName) === "شخصحقیقی")
+    .map((row) => ({
+      id: row.id,
+      insCode: row.insCode,
+      instrumentName: row.instrumentName,
+      shareholderType: "شخص حقیقی" as const,
+      previousShares: row.previousShares,
+      currentShares: row.currentShares,
+      changeShares: row.changeShares,
+      changeEvidence: row.changeEvidence,
+      date: row.date,
+    }));
 }
 
 export function extractMajorIndividualHoldingIncreases(payload: unknown): MajorIndividualHoldingIncrease[] {

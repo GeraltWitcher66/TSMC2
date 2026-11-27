@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { compactSharesFa, holderChangeValueToman } from "../app/lib/format.ts";
 import { sessionFlow, weeklySummary } from "../app/lib/weekly-real-money.ts";
+import { extractMajorHolderChanges, extractMajorIndividualHoldingChanges } from "../app/lib/market.ts";
 
 const clientSource = readFileSync("app/ScreenerClient.tsx", "utf8");
 const panelStart = clientSource.indexOf("function renderHighlightsPanel");
@@ -62,13 +63,46 @@ test("the tab renders the eight cards in the requested order", () => {
   assert.ok(clientSource.includes('<span className="highlight-number">۸</span>'), "reversal card is numbered ۸");
 });
 
+test("card 3 keeps every major shareholder with its real name, while the individual flow stays individual", () => {
+  const payload = {
+    dates: [20260928, 20260929],
+    shareHoldersChanges: [
+      { id: "bank", name: "بانك سامان", insList: [{ insCode: "46348559193224090", name: "سپ", firstDay: "1000", secondDay: "80000000" }] },
+      { id: "person", name: "شخص حقیقی", insList: [{ insCode: "111", name: "خساپا", firstDay: "200", secondDay: "500" }] },
+    ],
+  };
+  const now = new Date("2026-09-30T09:30:00Z");
+  const major = extractMajorHolderChanges(payload, { now });
+  assert.deepEqual(major.map((row) => row.holderName).sort(), ["بانک سامان", "شخص حقیقی"].sort(), "every major holder is kept with a normalized name");
+  assert.deepEqual(major.map((row) => row.changeShares).sort((a, b) => a - b), [300, 79_999_000]);
+  assert.ok(major.every((row) => row.date === 20260929 && row.changeEvidence === "snapshot"));
+
+  const individuals = extractMajorIndividualHoldingChanges(payload, { now });
+  assert.equal(individuals.length, 1, "the individual-only flow still filters legal holders");
+  assert.equal(individuals[0].insCode, "111");
+  assert.equal(individuals[0].shareholderType, "شخص حقیقی");
+  assert.ok(!("holderName" in individuals[0]), "individual rows keep their previous shape");
+});
+
+test("card 3 reads the named major-holder list from the tab's existing payload", () => {
+  assert.ok(panel.includes("سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل"), "card 3 subtitle names major holders");
+  assert.ok(panel.includes("سهامدار عمده (حقیقی و حقوقی)"), "the help box explains the wider shareholder set");
+  const rows = clientSource.match(/const holderValueRows = useMemo[\s\S]*?\[highlightHoldings, sessionRowsBySymbol\]\);/);
+  assert.ok(rows, "card 3 row builder found");
+  assert.ok(rows[0].includes("highlightHoldings?.majorHolders"), "card 3 uses the named major holders");
+  assert.ok(rows[0].includes("holder.holderName"), "each row shows its own shareholder name");
+  assert.ok(!rows[0].includes("شخص حقیقی"), "the fixed individual label is gone from card 3");
+  assert.ok(rows[0].includes("holder: holder.holderName"), "the name column sorts by the shareholder name");
+});
+
 test("the old shareholder card and its expand state are gone from the tab", () => {
   assert.ok(!panel.includes("تغییرات سهامدار حقیقی"), "removed card title is gone");
   assert.ok(!panel.includes("holder-highlight-card"), "removed card markup is gone");
   assert.ok(!clientSource.includes("highlightOpenGroups"), "removed expand state is gone");
   assert.ok(!clientSource.includes("showAllHighlightHolders"), "removed show-all state is gone");
   // The ranking still needs the shareholder data, so the shared loader stays.
-  assert.ok(clientSource.includes("highlightHoldings?.rows"), "card 3 reads the existing shareholder data");
+  assert.ok(clientSource.includes("highlightHoldings?.majorHolders"), "card 3 reads the existing shareholder payload");
+  assert.ok(clientSource.includes("fetchHoldingRows(symbols"), "the shared holder loader is unchanged");
 });
 
 test("cards 3, 4 and 5 use the shared compact table and its twenty rows", () => {

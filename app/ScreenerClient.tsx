@@ -47,6 +47,7 @@ import {
   symbolsForScope,
   type WatchlistScope,
   type CorporateAction,
+  type MajorHolderChange,
   type MajorIndividualHoldingSummary,
   type MarketHighlight,
   type PeriodMetrics,
@@ -80,8 +81,10 @@ type ActionView = { row: ScreenerRow; actions: CorporateAction[]; period: Period
 type HighlightListRow = MarketHighlight & { primary: string; secondary: string; tag?: string; sessionRange?: string; coverageLabel?: string | null };
 
 type HolderChangeSummary = MajorIndividualHoldingSummary;
+/** Card 3 row: any major shareholder (individual or legal) with its real name. */
+type MajorHolderRow = MajorHolderChange & { symbol: string };
 type HolderScope = WatchlistScope | "market";
-type HoldingPage = { rows: HolderIncreaseRow[]; sourceDate: number | null; fetchedAt: string; partial?: boolean; fallback?: boolean; delivery?: HolderDelivery; sourceCompleteness?: string; nextCursor?: number | null; error?: string; warning?: string };
+type HoldingPage = { rows: HolderIncreaseRow[]; majorHolders?: MajorHolderRow[]; sourceDate: number | null; fetchedAt: string; partial?: boolean; fallback?: boolean; delivery?: HolderDelivery; sourceCompleteness?: string; nextCursor?: number | null; error?: string; warning?: string };
 type HighlightSnapshot = { rows: MarketHighlight[]; fetchedAt?: string; latestDate?: number | null; partial?: boolean; clientTypeUnavailable?: boolean; missingCount?: number; error?: string };
 const scopeLabel = (scope: HolderScope) => scope === "market" ? "کل بازار" : scope === "all" ? "کل واچ‌لیست" : scope === "haghighi" ? "حقیقی" : scope === "zarbanana" ? "زرد/نارنجی" : "دلخواه";
 
@@ -167,8 +170,9 @@ const mapConcurrent = async <T, R>(items: T[], concurrency: number, mapper: (ite
 };
 
 async function fetchServerHoldingRows(symbols?: string[], isCurrent: () => boolean = () => true, signal?: AbortSignal): Promise<HoldingPage> {
-  const result: HoldingPage = { rows: [], sourceDate: null, fetchedAt: "", partial: false, fallback: false };
+  const result: HoldingPage = { rows: [], majorHolders: [], sourceDate: null, fetchedAt: "", partial: false, fallback: false };
   const seen = new Set<string>();
+  const majorHolders = new Map<string, MajorHolderRow>();
   let pages = 0;
   const expires = Date.now() + 80_000;
   try {
@@ -196,6 +200,8 @@ async function fetchServerHoldingRows(symbols?: string[], isCurrent: () => boole
       result.fallback ||= Boolean(data.fallback);
       result.delivery = result.fallback ? "bundled" : result.delivery === "cache" || data.delivery === "cache" ? "cache" : data.delivery;
       for (const row of data.rows) if (!seen.has(row.id)) { seen.add(row.id); result.rows.push(row); }
+      // Every page carries the same named-major-holder list of the payload.
+      for (const row of data.majorHolders ?? []) majorHolders.set(row.id, row);
       const next = data.nextCursor ?? null;
       if (next !== null && (!Number.isInteger(next) || next <= cursor)) throw new Error("ادامه اسکن از منبع معتبر نیست.");
       cursor = next;
@@ -207,6 +213,7 @@ async function fetchServerHoldingRows(symbols?: string[], isCurrent: () => boole
     result.error = error instanceof Error ? error.message : "دریافت صفحات ناقص ماند.";
   }
   result.rows.sort((a, b) => b.changeShares - a.changeShares || a.symbol.localeCompare(b.symbol, "fa"));
+  result.majorHolders = [...majorHolders.values()];
   return result;
 }
 
@@ -679,6 +686,9 @@ export default function ScreenerClient() {
   const increaseRequest = useRef(0);
   const highlightCache = useRef(new Map<string, HighlightSnapshot>());
   const increaseCache = useRef(new Map<string, HoldingPage>());
+  // Card 3's cached page changed shape (named major holders). A versioned key
+  // retires in-memory pages that only carry unnamed individual rows.
+  const holderRowsCacheKey = (key: string) => `holder-rows-v2:${key}`;
   const sourceControllers = useRef<Partial<Record<SourceKey, AbortController>>>({});
   const sourceRequests = useRef<Record<SourceKey, number>>({ haghighi: 0, zarbanana: 0, custom: 0 });
   const activeSourceRef = useRef(activeSource);
@@ -1309,7 +1319,7 @@ export default function ScreenerClient() {
     setHighlightsUpdatedAt(cached?.fetchedAt ? new Date(cached.fetchedAt) : null);
     // Price ranking must finish before the 178-symbol shareholder lookup;
     // launching both at once exhausted upstream/Worker request budgets.
-    const priorHoldings = increaseCache.current.get(cacheKey);
+    const priorHoldings = increaseCache.current.get(holderRowsCacheKey(cacheKey));
     setHighlightHoldings(priorHoldings ? { ...priorHoldings, delivery: priorHoldings.fallback ? "bundled" : "cache" } : null);
     setHighlightHoldingsError("");
     setHighlightHoldingsLoading(Boolean(symbols.length));
@@ -1464,7 +1474,7 @@ export default function ScreenerClient() {
   }
 
   async function fetchHighlightHoldings(requestId: number, cacheKey: string, symbols: string[], signal: AbortSignal) {
-    const cachedHoldings = increaseCache.current.get(cacheKey);
+    const cachedHoldings = increaseCache.current.get(holderRowsCacheKey(cacheKey));
     setHighlightHoldings(cachedHoldings ? { ...cachedHoldings, delivery: cachedHoldings.fallback ? "bundled" : "cache" } : null);
     setHighlightHoldingsError("");
     setHighlightHoldingsLoading(Boolean(symbols.length));
@@ -1473,7 +1483,7 @@ export default function ScreenerClient() {
       const data = await fetchHoldingRows(symbols, () => highlightRequest.current === requestId, signal);
       if (highlightRequest.current !== requestId) return;
       const safe = preserveDatedHolderRefresh(cachedHoldings, data);
-      increaseCache.current.set(cacheKey, safe);
+      increaseCache.current.set(holderRowsCacheKey(cacheKey), safe);
       setHighlightHoldings(safe);
     } catch (error) {
       if (highlightRequest.current === requestId) setHighlightHoldingsError(error instanceof Error ? error.message : "دریافت تغییرات سهامداران ناموفق بود.");
@@ -2019,11 +2029,13 @@ export default function ScreenerClient() {
   // own rows from these quotes instead of issuing new price requests.
   const sessionRowsBySymbol = useMemo(() => new Map(highlightGroups.sessionRows.map((row) => [row.symbol, row])), [highlightGroups.sessionRows]);
 
-  // Card 3: one row per shareholder record whose share count changed. Value is
+  // Card 3: one row per major shareholder record whose share count changed.
+  // The record now carries the holder's real name (individual or legal) from
+  // the same payload the individual list already fetched. Value is
   // shares × closing price ÷ 10 (Toman); records without a usable price cannot
   // be ranked by value and are left out.
   const holderValueRows = useMemo<RankedRow[]>(() => {
-    return (highlightHoldings?.rows ?? []).flatMap((holder) => {
+    return (highlightHoldings?.majorHolders ?? []).flatMap((holder) => {
       const quote = sessionRowsBySymbol.get(holder.symbol);
       if (!quote) return [];
       const valueToman = holderChangeValueToman(holder.changeShares, quote.priceClose);
@@ -2031,10 +2043,10 @@ export default function ScreenerClient() {
       const price = rankPriceCells(quote);
       return [{
         key: holder.id,
-        sort: { symbol: holder.symbol, holder: holder.symbol, change: holder.changeShares, value: valueToman, ...price.sort },
+        sort: { symbol: holder.symbol, holder: holder.holderName, change: holder.changeShares, value: valueToman, ...price.sort },
         cells: {
           symbol: rankSymbolCell(quote),
-          holder: <span className="rank-holder-name">شخص حقیقی</span>,
+          holder: <span className="rank-holder-name">{holder.holderName}</span>,
           change: <strong dir="ltr" className={holder.changeShares > 0 ? "positive" : holder.changeShares < 0 ? "negative" : "muted"}>
             {holder.changeShares > 0 ? "+" : holder.changeShares < 0 ? "−" : ""}{compactSharesFa(Math.abs(holder.changeShares))}
           </strong>,
@@ -2136,7 +2148,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ کارت سوم ۲۰ سهامدار حقیقی را با بیشترین ارزش تغییر تعداد سهم نشان می‌دهد؛ کارت‌های چهارم و پنجم ۲۰ نماد با بیشترین ورود پول حقیقی روزانه و جمع ۵ جلسه آخر را مرتب می‌کنند و کارت‌های ششم تا هشتم ۱۰ نماد برتر ارزش معاملات، حجم معاملات و بازگشت از صف فروش را نشان می‌دهند.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ کارت سوم ۲۰ سهامدار عمده (حقیقی و حقوقی) را با بیشترین ارزش تغییر تعداد سهم نشان می‌دهد؛ کارت‌های چهارم و پنجم ۲۰ نماد با بیشترین ورود پول حقیقی روزانه و جمع ۵ جلسه آخر را مرتب می‌کنند و کارت‌های ششم تا هشتم ۱۰ نماد برتر ارزش معاملات، حجم معاملات و بازگشت از صف فروش را نشان می‌دهند.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -2149,10 +2161,10 @@ export default function ScreenerClient() {
       <div className="highlight-grid">
         <IndustryFlowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <IndustryFlowCard number="۲" title={industrySessions >= 3 ? "ورود پول به صنعت (۳ روزه)" : `ورود پول به صنعت (جمع ${faI.format(industrySessions)} جلسه)`} subtitle={industrySessions >= 3 ? "جمع ۳ جلسه آخر معاملاتی به تفکیک صنعت" : "۳ جلسه کامل نشده؛ ارقام جمع جلسه‌های ثبت‌شده است"} sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} progress={backfillProgress} emptyText="برای جمع چندروزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
-        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران حقیقی با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
+        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
           "ارزش تغییر = تغییر تعداد سهم × قیمت پایانی همان جلسه ÷ ۱۰ (واحد: تومان).",
-          "هر ردیف یک سهامدار حقیقی در یک نماد است که تعداد سهامش نسبت به جلسه قبل تغییر کرده؛ کاهش‌ها قرمز نمایش داده می‌شوند.",
-          "منبع، تغییرات سهامداران حقیقی عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
+          "هر ردیف یک سهامدار عمده (حقیقی و حقوقی) با نام خودش در یک نماد است که تعداد سهامش نسبت به جلسه قبل تغییر کرده؛ کاهش‌ها قرمز نمایش داده می‌شوند.",
+          "منبع، تغییرات سهامداران عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
         ]} error={highlightHoldingsError} status={`${highlightHoldingsLoading ? "در حال دریافت… · " : ""}تاریخ تغییرات: ${fmtDate(highlightHoldings?.sourceDate)}${highlightHoldings?.fallback ? " · داده پشتیبان" : ""}${highlightHoldings?.partial ? " · اسکن ناقص" : ""}`} emptyText={highlightHoldingsLoading ? "در حال دریافت تغییرات سهامداران…" : "داده تغییرات سهامداران برای این فهرست در دسترس نیست."} />
         <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" help={[
           "ورود پول = ارزش خرید حقیقی − ارزش فروش حقیقی همان جلسه (تومان).",
