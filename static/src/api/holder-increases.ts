@@ -152,8 +152,8 @@ async function rowPage(cursor: number, symbols?: string[], expectedDate?: number
     let unresolvedRows = 0;
     let excludedRows = 0;
     const requested = symbols ? new Set(symbols) : null;
-    // Card 3 ranks every major shareholder by name, using the payload this page
-    // already fetched: no extra upstream request is issued for it.
+    // Card 3 ranks legal major shareholders by name, using the payload this
+    // page already fetched: no extra upstream request is issued for it.
     const majorHolders = symbols ? extractMajorHolderChanges(payload).flatMap((change): Array<MajorHolderChange & { symbol: string }> => {
       const symbol = symbolsByCode.get(change.insCode);
       if (!symbol || !requested?.has(symbol) || symbol.endsWith("ح") || /\d+$/.test(symbol)) return [];

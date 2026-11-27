@@ -454,9 +454,12 @@ function extractHolderChanges(
   return result.sort((a, b) => Math.abs(b.changeShares) - Math.abs(a.changeShares) || a.instrumentName.localeCompare(b.instrumentName, "fa"));
 }
 
-/** Every major shareholder (individual or legal), with its real name. */
+/**
+ * Major shareholders that are legal entities, with their registered names.
+ * Individual ("شخص حقیقی") records belong to the individual-only flow.
+ */
 export function extractMajorHolderChanges(payload: unknown, options: { now?: Date } = {}): MajorHolderChange[] {
-  return extractHolderChanges(payload, options, () => true);
+  return extractHolderChanges(payload, options, (holderName) => normalizeHolderIdentity(holderName) !== normalizeHolderIdentity("شخص حقیقی"));
 }
 
 export function extractMajorIndividualHoldingChanges(payload: unknown, options: { now?: Date } = {}): MajorIndividualHoldingChange[] {

@@ -63,7 +63,7 @@ test("the tab renders the eight cards in the requested order", () => {
   assert.ok(clientSource.includes('<span className="highlight-number">۸</span>'), "reversal card is numbered ۸");
 });
 
-test("card 3 keeps every major shareholder with its real name, while the individual flow stays individual", () => {
+test("card 3 keeps only legal major shareholders by name, while the individual flow stays individual", () => {
   const payload = {
     dates: [20260928, 20260929],
     shareHoldersChanges: [
@@ -73,8 +73,8 @@ test("card 3 keeps every major shareholder with its real name, while the individ
   };
   const now = new Date("2026-09-30T09:30:00Z");
   const major = extractMajorHolderChanges(payload, { now });
-  assert.deepEqual(major.map((row) => row.holderName).sort(), ["بانک سامان", "شخص حقیقی"].sort(), "every major holder is kept with a normalized name");
-  assert.deepEqual(major.map((row) => row.changeShares).sort((a, b) => a - b), [300, 79_999_000]);
+  assert.deepEqual(major.map((row) => row.holderName), ["بانک سامان"], "legal holders are kept with a normalized name");
+  assert.deepEqual(major.map((row) => row.changeShares), [79_999_000], "individual (شخص حقیقی) records are left out");
   assert.ok(major.every((row) => row.date === 20260929 && row.changeEvidence === "snapshot"));
 
   const individuals = extractMajorIndividualHoldingChanges(payload, { now });
@@ -84,15 +84,19 @@ test("card 3 keeps every major shareholder with its real name, while the individ
   assert.ok(!("holderName" in individuals[0]), "individual rows keep their previous shape");
 });
 
-test("card 3 reads the named major-holder list from the tab's existing payload", () => {
-  assert.ok(panel.includes("سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل"), "card 3 subtitle names major holders");
-  assert.ok(panel.includes("سهامدار عمده (حقیقی و حقوقی)"), "the help box explains the wider shareholder set");
+test("card 3 groups the named major holders of one symbol into a single row", () => {
+  assert.ok(panel.includes("سهامداران عمده حقوقی هر نماد، گروه‌بندی‌شده بر اساس نماد"), "card 3 subtitle describes the symbol grouping");
+  assert.ok(panel.includes("هر ردیف یک نماد است"), "the help box explains the symbol grouping");
+  assert.ok(panel.includes("ستون «سهامداران»"), "the help box explains the stacked shareholder list");
+  assert.ok(!panel.includes("حقیقی و حقوقی"), "card 3 no longer advertises individual holders");
   const rows = clientSource.match(/const holderValueRows = useMemo[\s\S]*?\[highlightHoldings, sessionRowsBySymbol\]\);/);
   assert.ok(rows, "card 3 row builder found");
   assert.ok(rows[0].includes("highlightHoldings?.majorHolders"), "card 3 uses the named major holders");
-  assert.ok(rows[0].includes("holder.holderName"), "each row shows its own shareholder name");
+  assert.ok(rows[0].includes("holder.holderName"), "each stacked entry keeps its own shareholder name");
   assert.ok(!rows[0].includes("شخص حقیقی"), "the fixed individual label is gone from card 3");
-  assert.ok(rows[0].includes("holder: holder.holderName"), "the name column sorts by the shareholder name");
+  assert.ok(rows[0].includes("bySymbol.get(holder.symbol)"), "rows are grouped by symbol");
+  assert.ok(rows[0].includes("key: quote.symbol"), "one row per symbol");
+  assert.ok(rows[0].includes("className=\"rank-holder-group\""), "several holders share one grouped cell");
 });
 
 test("the old shareholder card and its expand state are gone from the tab", () => {
@@ -118,7 +122,7 @@ test("card 3 columns: symbol, holder, change, value, then the shared price colum
   const columns = clientSource.match(/const HOLDER_VALUE_COLUMNS[\s\S]*?\];/);
   assert.ok(columns, "holder column list found");
   let cursor = -1;
-  for (const label of ["نماد", "نام سهامدار", "تغییرات", "ارزش (تومان)"]) {
+  for (const label of ["نماد", "سهامداران", "تغییرات", "ارزش (تومان)"]) {
     const at = columns[0].indexOf(label, cursor + 1);
     assert.ok(at > cursor, `column ${label} keeps its place`);
     cursor = at;

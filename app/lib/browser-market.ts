@@ -108,8 +108,8 @@ export function createBrowserMarketClient(request: typeof fetch = fetch) {
     const byCode = new Map(infos);
     let recoveredRows = 0;
     let unresolvedRows = 0;
-    // Card 3 needs every major shareholder (individual and legal) by name; it
-    // reuses this payload and the code→symbol map instead of a new request.
+    // Card 3 needs legal major shareholders by name; it reuses this payload
+    // and the code→symbol map instead of a new request.
     const majorHolders = extractMajorHolderChanges(payload).flatMap((change) => {
       const symbol = symbolsByCode.get(change.insCode);
       if (!symbol || (requested && !requested.has(symbol)) || symbol.endsWith("ح") || /\d+$/.test(symbol)) return [];

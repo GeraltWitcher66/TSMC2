@@ -362,7 +362,7 @@ const rankPriceColumns: RankedColumn[] = [
 
 const HOLDER_VALUE_COLUMNS: RankedColumn[] = [
   { key: "symbol", label: "نماد" },
-  { key: "holder", label: "نام سهامدار" },
+  { key: "holder", label: "سهامداران" },
   { key: "change", label: "تغییرات" },
   { key: "value", label: "ارزش (تومان)" },
   ...rankPriceColumns,
@@ -706,9 +706,9 @@ export default function ScreenerClient() {
   const increaseRequest = useRef(0);
   const highlightCache = useRef(new Map<string, HighlightSnapshot>());
   const increaseCache = useRef(new Map<string, HoldingPage>());
-  // Card 3's cached page changed shape (named major holders). A versioned key
-  // retires in-memory pages that only carry unnamed individual rows.
-  const holderRowsCacheKey = (key: string) => `holder-rows-v2:${key}`;
+  // Card 3's cached page changed shape (named legal major holders). A versioned
+  // key retires in-memory pages built from earlier holder sets.
+  const holderRowsCacheKey = (key: string) => `holder-rows-v3:${key}`;
   const sourceControllers = useRef<Partial<Record<SourceKey, AbortController>>>({});
   const sourceRequests = useRef<Record<SourceKey, number>>({ haghighi: 0, zarbanana: 0, custom: 0 });
   const activeSourceRef = useRef(activeSource);
@@ -2049,32 +2049,49 @@ export default function ScreenerClient() {
   // own rows from these quotes instead of issuing new price requests.
   const sessionRowsBySymbol = useMemo(() => new Map(highlightGroups.sessionRows.map((row) => [row.symbol, row])), [highlightGroups.sessionRows]);
 
-  // Card 3: one row per major shareholder record whose share count changed.
-  // The record now carries the holder's real name (individual or legal) from
-  // the same payload the individual list already fetched. Value is
-  // shares × closing price ÷ 10 (Toman); records without a usable price cannot
-  // be ranked by value and are left out.
+  // Card 3: one row per symbol. Every legal major shareholder of that symbol
+  // whose share count changed is stacked in the name cell with its own signed
+  // change, so a symbol with several holders stays a single grouped row. The
+  // change and value columns carry that symbol's totals; value is shares ×
+  // closing price ÷ 10 (Toman), and records without a usable price cannot be
+  // ranked by value and are left out. Individual (حقیقی) records are filtered
+  // out upstream.
   const holderValueRows = useMemo<RankedRow[]>(() => {
-    return (highlightHoldings?.majorHolders ?? []).flatMap((holder) => {
+    const bySymbol = new Map<string, { quote: MarketHighlight; holders: Array<{ name: string; change: number; value: number }> }>();
+    for (const holder of highlightHoldings?.majorHolders ?? []) {
       const quote = sessionRowsBySymbol.get(holder.symbol);
-      if (!quote) return [];
+      if (!quote) continue;
       const valueToman = holderChangeValueToman(holder.changeShares, quote.priceClose);
-      if (valueToman === null) return [];
+      if (valueToman === null) continue;
+      const group = bySymbol.get(holder.symbol) ?? { quote, holders: [] };
+      group.holders.push({ name: holder.holderName, change: holder.changeShares, value: valueToman });
+      bySymbol.set(holder.symbol, group);
+    }
+    return [...bySymbol.values()].map(({ quote, holders }) => {
+      const change = holders.reduce((total, item) => total + item.change, 0);
+      const valueToman = holders.reduce((total, item) => total + item.value, 0);
       const price = rankPriceCells(quote);
-      return [{
-        key: holder.id,
-        sort: { symbol: holder.symbol, holder: holder.holderName, change: holder.changeShares, value: valueToman, ...price.sort },
+      return {
+        key: quote.symbol,
+        sort: { symbol: quote.symbol, holder: holders.map((item) => item.name).join("، "), change, value: valueToman, ...price.sort },
         cells: {
           symbol: rankSymbolCell(quote),
-          holder: <span className="rank-holder-name">{holder.holderName}</span>,
-          change: <strong dir="ltr" className={holder.changeShares > 0 ? "positive" : holder.changeShares < 0 ? "negative" : "muted"}>
-            {holder.changeShares > 0 ? "+" : holder.changeShares < 0 ? "−" : ""}{compactSharesFa(Math.abs(holder.changeShares))}
+          holder: <span className="rank-holder-group">
+            {holders.map((item, index) => <span key={`${item.name}-${index}`} className="rank-holder-row">
+              <span className="rank-holder-name">{item.name}</span>
+              <small dir="ltr" className={item.change > 0 ? "positive" : item.change < 0 ? "negative" : "muted"}>
+                {item.change > 0 ? "+" : item.change < 0 ? "−" : ""}{compactSharesFa(Math.abs(item.change))}
+              </small>
+            </span>)}
+          </span>,
+          change: <strong dir="ltr" className={change > 0 ? "positive" : change < 0 ? "negative" : "muted"}>
+            {change > 0 ? "+" : change < 0 ? "−" : ""}{compactSharesFa(Math.abs(change))}
           </strong>,
           // compactToman takes Rial; ×10 turns the Toman value back into Rial.
           value: <strong className={valueToman > 0 ? "positive" : valueToman < 0 ? "negative" : "muted"}>{compactToman(valueToman * 10)}</strong>,
           ...price.cells,
         },
-      }];
+      };
     });
   }, [highlightHoldings, sessionRowsBySymbol]);
 
@@ -2168,7 +2185,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ کارت سوم ۲۰ سهامدار عمده (حقیقی و حقوقی) را با بیشترین ارزش تغییر تعداد سهم نشان می‌دهد؛ کارت‌های چهارم و پنجم ۲۰ نماد با بیشترین ورود پول حقیقی روزانه و جمع ۵ جلسه آخر را مرتب می‌کنند و کارت‌های ششم تا هشتم ۱۰ نماد برتر ارزش معاملات، حجم معاملات و بازگشت از صف فروش را نشان می‌دهند.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ کارت سوم ۲۰ سهامدار عمده حقوقی را با بیشترین ارزش تغییر تعداد سهم نشان می‌دهد؛ کارت‌های چهارم و پنجم ۲۰ نماد با بیشترین ورود پول حقیقی روزانه و جمع ۵ جلسه آخر را مرتب می‌کنند و کارت‌های ششم تا هشتم ۱۰ نماد برتر ارزش معاملات، حجم معاملات و بازگشت از صف فروش را نشان می‌دهند.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -2189,9 +2206,9 @@ export default function ScreenerClient() {
         <section className="hl-group" aria-label="پول حقیقی و سهامداران عمده">
           <h3 className="hl-group-title">پول حقیقی و سهامداران عمده</h3>
           <div className="hl-grid">
-        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" wide loading={highlightHoldingsLoading} columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
+        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده حقوقی هر نماد، گروه‌بندی‌شده بر اساس نماد" icon="↕" wide loading={highlightHoldingsLoading} columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
           "ارزش تغییر = تغییر تعداد سهم × قیمت پایانی همان جلسه ÷ ۱۰ (واحد: تومان).",
-          "هر ردیف یک سهامدار عمده (حقیقی و حقوقی) با نام خودش در یک نماد است که تعداد سهامش نسبت به جلسه قبل تغییر کرده؛ کاهش‌ها قرمز نمایش داده می‌شوند.",
+          "هر ردیف یک نماد است؛ اگر چند سهامدار عمده حقوقی در آن نماد تغییر کرده باشند، همه در ستون «سهامداران» با تغییر خودشان فهرست می‌شوند و ستون‌های تغییرات و ارزش جمع همان نماد را نشان می‌دهند. کاهش‌ها قرمز نمایش داده می‌شوند.",
           "منبع، تغییرات سهامداران عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
         ]} error={highlightHoldingsError} status={`${highlightHoldingsLoading ? "در حال دریافت… · " : ""}تاریخ تغییرات: ${fmtDate(highlightHoldings?.sourceDate)}${highlightHoldings?.fallback ? " · داده پشتیبان" : ""}${highlightHoldings?.partial ? " · اسکن ناقص" : ""}`} emptyText={highlightHoldingsLoading ? "در حال دریافت تغییرات سهامداران…" : "داده تغییرات سهامداران برای این فهرست در دسترس نیست."} />
         <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" loading={highlightsLoading} help={[
