@@ -39,7 +39,7 @@ test("A: reversal grid CSS carries a titled column for the session date too", ()
 test("B: HighlightCard table has a تاریخ column and per-row date cell", () => {
   const start = clientSource.indexOf("function HighlightCard");
   assert.ok(start > 0, "HighlightCard found");
-  const card = clientSource.slice(start, start + 2200);
+  const card = clientSource.slice(start, clientSource.indexOf("function ReversalHighlightCard", start));
   assert.ok(card.includes("<th>تاریخ</th>"), "تاریخ header added");
   // The cell is still one per-row date small; `rowDate` keeps the single
   // session date for daily cards and shows the session range on the weekly card.

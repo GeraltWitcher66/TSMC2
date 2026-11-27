@@ -297,7 +297,14 @@ function HolderChangeCell({ summary, loading, meta }: { summary?: HolderChangeSu
   </div>;
 }
 
-function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progress }: {
+/** Six placeholder rows while a card's first payload is still arriving. */
+function SkeletonRows({ columns }: { columns: number }) {
+  return <>{Array.from({ length: 6 }, (_, row) => <tr key={row} className="hl-skeleton-row" aria-hidden="true">
+    {Array.from({ length: columns }, (_, column) => <td key={column}><span className={`hl-skeleton${column === 0 ? " hl-skeleton--short" : ""}`} /></td>)}
+  </tr>)}</>;
+}
+
+function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progress, loading }: {
   number: string;
   title: string;
   subtitle: string;
@@ -306,37 +313,40 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progres
   emptyText: string;
   /** Background work this card is still doing; the other cards never wait for it. */
   progress?: string;
+  loading?: boolean;
 }) {
   const rowDate = (row: HighlightListRow) => row.sessionRange ?? fmtDate(row.sessionDate);
-  return <article className="highlight-card">
-    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">{icon}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
-    {progress && <p className="industry-progress" role="status">{progress}</p>}
-    <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{rows.map((row) => <tr key={row.symbol}>
+  return <article className="highlight-card hl-card">
+    <header className="hl-head"><div className="hl-head-main"><span className="highlight-number">{number}</span><span className="highlight-icon hl-icon" aria-hidden="true">{icon}</span><div className="hl-head-text"><h3 title={title}>{title}</h3><p title={subtitle}>{subtitle}</p></div></div></header>
+    {progress && <div className="hl-progress" role="status"><span className="hl-progress-bar hl-progress-bar--busy" /><p>{progress}</p></div>}
+    <div className="table-wrap highlight-table hl-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{loading && !rows.length ? <SkeletonRows columns={6} /> : rows.map((row) => <tr key={row.symbol}>
       <td><span className="symbol-date-line"><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="row-date" aria-label={`تاریخ داده ${rowDate(row)}`}>{rowDate(row)}</small></span><small>{row.name}</small></td>
-      <td><strong>{row.primary}</strong>{row.coverageLabel && <small className="weekly-coverage">{row.coverageLabel}</small>}</td>
-      <td><strong>{fp(row.priceLast)}</strong><small className={row.lastChangePct >= 0 ? "positive" : "negative"}>{pct(row.lastChangePct)}</small></td>
-      <td><strong>{fp(row.priceClose)}</strong><small className={row.closeChangePct >= 0 ? "positive" : "negative"}>{pct(row.closeChangePct)}</small></td>
-      <td><strong className={row.priceLast >= row.priceClose ? "positive" : "negative"}>{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}</strong><small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></td>
+      <td className="hl-primary"><strong dir="ltr">{row.primary}</strong>{row.coverageLabel && <small className="weekly-coverage">{row.coverageLabel}</small>}</td>
+      <td><strong dir="ltr">{fp(row.priceLast)}</strong><small className={row.lastChangePct >= 0 ? "positive" : "negative"}>{pct(row.lastChangePct)}</small></td>
+      <td><strong dir="ltr">{fp(row.priceClose)}</strong><small className={row.closeChangePct >= 0 ? "positive" : "negative"}>{pct(row.closeChangePct)}</small></td>
+      <td><strong dir="ltr" className={row.priceLast >= row.priceClose ? "positive" : "negative"}>{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}</strong><small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></td>
       <td><small className="row-date">{rowDate(row)}</small></td>
     </tr>)}</tbody></table></div>
-    {!rows.length && <div className="highlight-empty">{emptyText}</div>}
+    {!rows.length && !loading && <div className="highlight-empty hl-empty">{emptyText}</div>}
   </article>;
 }
 
-function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; emptyText: string }) {
-  return <article className="highlight-card reversal-highlight-card">
-    <header>      <div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۸</span></header>
-    <div className="reversal-table-head">
+function ReversalHighlightCard({ rows, emptyText, loading }: { rows: MarketHighlight[]; emptyText: string; loading?: boolean }) {
+  return <article className="highlight-card hl-card reversal-highlight-card hl-reversal hl-card--wide">
+    <header className="hl-head"><div className="hl-head-main"><span className="highlight-number">۸</span><span className="highlight-icon hl-icon" aria-hidden="true">↺</span><div className="hl-head-text"><h3 title="از صف فروش به مثبت">از صف فروش به مثبت</h3><p title="لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی">لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div></header>
+    <div className="reversal-table-head hl-reversal-head">
       <span>نماد</span><span>آخرین معامله (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span><span>تاریخ</span>
     </div>
-    <ol>{rows.map((row) => <li key={row.symbol}>
+    <ol className="hl-reversal-list">{rows.map((row) => <li key={row.symbol}>
       <span className="reversal-symbol" title={`کمترین معامله ${fp(row.priceMin)} · کف مجاز ${fp(row.allowedMin)}`}><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /></span>
-      <span className="reversal-value"><strong>{fp(row.priceLast)}</strong><small className="positive">{pct(row.lastChangePct)}</small></span>
-      <span className="reversal-value"><strong>{fp(row.priceClose)}</strong><small className="negative">{pct(row.closeChangePct)}</small></span>
-      <span className="reversal-value">{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}<small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></span>
+      <span className="reversal-value"><strong dir="ltr">{fp(row.priceLast)}</strong><small className="positive">{pct(row.lastChangePct)}</small></span>
+      <span className="reversal-value"><strong dir="ltr">{fp(row.priceClose)}</strong><small className="negative">{pct(row.closeChangePct)}</small></span>
+      <span className="reversal-value" dir="ltr">{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}<small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></span>
       <span className="reversal-date">{fmtDate(row.sessionDate)}</span>
     </li>)}</ol>
-    {!rows.length && <div className="highlight-empty">{emptyText}</div>}
+    {!rows.length && (loading
+      ? <div className="hl-skeleton-list" aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index} className="hl-skeleton" />)}</div>
+      : <div className="highlight-empty hl-empty">{emptyText}</div>)}
   </article>;
 }
 
@@ -399,7 +409,7 @@ function rankPriceCells(row: MarketHighlight, date?: number | null) {
  * ranked cards look identical to cards 1 and 2, and shows the first twenty
  * rows of whichever column the reader picks.
  */
-function RankedTableCard({ number, title, subtitle, icon, columns, rows, defaultSort, help, progress, status, error, emptyText }: {
+function RankedTableCard({ number, title, subtitle, icon, columns, rows, defaultSort, help, progress, status, error, emptyText, wide, loading }: {
   number: string;
   title: string;
   subtitle: string;
@@ -412,6 +422,9 @@ function RankedTableCard({ number, title, subtitle, icon, columns, rows, default
   status?: string;
   error?: string;
   emptyText: string;
+  /** Full-width card in the two-column grid. */
+  wide?: boolean;
+  loading?: boolean;
 }) {
   const [sortKey, setSortKey] = useState(defaultSort);
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
@@ -434,24 +447,29 @@ function RankedTableCard({ number, title, subtitle, icon, columns, rows, default
     if (sortKey === key) setSortDir((current) => current === "desc" ? "asc" : "desc");
     else { setSortKey(key); setSortDir(key === "symbol" || key === "holder" ? "asc" : "desc"); }
   };
-  const caret = (key: string) => sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : "";
-  return <article className="highlight-card ranked-card">
-    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">{icon}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
-    {status && <p className="holder-highlight-status">{status}</p>}
-    <div className="industry-actions">
-      <button className={`industry-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
-    </div>
-    {helpOpen && <div className="industry-formulas">{help.map((line) => <p key={line}>{line}</p>)}</div>}
-    {progress && <p className="industry-progress" role="status">{progress}</p>}
-    {error && <p className="scan-error" role="alert">{error}{rows.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : ""}</p>}
-    <div className="table-wrap highlight-table industry-table ranked-table"><table aria-label={title}><thead><tr>
+  const caret = (key: string) => <span className={`hl-arrow${sortKey === key ? " is-active" : ""}`} aria-hidden="true">{sortKey === key ? (sortDir === "desc" ? "▼" : "▲") : "↕"}</span>;
+  // The status string already carries its own separated facts; each becomes a
+  // small chip, and the two coverage warnings turn amber.
+  const statusChips = (status ?? "").split(" · ").filter(Boolean);
+  return <article className={`highlight-card hl-card${wide ? " hl-card--wide" : ""}`}>
+    <header className="hl-head">
+      <div className="hl-head-main"><span className="highlight-number">{number}</span><span className="highlight-icon hl-icon" aria-hidden="true">{icon}</span><div className="hl-head-text"><h3 title={title}>{title}</h3><p title={subtitle}>{subtitle}</p></div></div>
+      <div className="hl-tools">
+        {statusChips.map((chip) => <span key={chip} className={`hl-chip${/پشتیبان|ناقص/.test(chip) ? " hl-chip--warn" : ""}`}>{chip}</span>)}
+        <button className={`industry-help hl-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
+      </div>
+    </header>
+    {helpOpen && <div className="industry-formulas hl-formulas">{help.map((line) => <p key={line}>{line}</p>)}</div>}
+    {progress && <div className="hl-progress" role="status"><span className="hl-progress-bar hl-progress-bar--busy" /><p>{progress}</p></div>}
+    {error && <p className="scan-error hl-error" role="alert">{error}{rows.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : ""}</p>}
+    <div className="table-wrap highlight-table industry-table hl-table"><table aria-label={title}><thead><tr>
       {columns.map((column) => <th key={column.key}>
-        <button type="button" className="industry-sort" title={column.title} onClick={() => sortBy(column.key)}>{column.label}{caret(column.key)}</button>
+        <button type="button" className="industry-sort hl-sort" title={column.title} onClick={() => sortBy(column.key)}>{column.label}{caret(column.key)}</button>
       </th>)}
     </tr></thead><tbody>
-      {shown.map((row) => <tr key={row.key}>{columns.map((column) => <td key={column.key}>{row.cells[column.key]}</td>)}</tr>)}
+      {loading && !shown.length ? <SkeletonRows columns={columns.length} /> : shown.map((row) => <tr key={row.key}>{columns.map((column) => <td key={column.key} className={column.key === defaultSort ? "hl-primary" : undefined}>{row.cells[column.key]}</td>)}</tr>)}
     </tbody></table></div>
-    {!rows.length && <div className="highlight-empty">{emptyText}</div>}
+    {!rows.length && !loading && <div className="highlight-empty hl-empty">{emptyText}</div>}
   </article>;
 }
 
@@ -492,35 +510,37 @@ function IndustryFlowCard({ number, title, subtitle, rows, loading, error, fetch
     if (sortKey === key) setSortDir((current) => current === "desc" ? "asc" : "desc");
     else { setSortKey(key); setSortDir(key === "name" ? "asc" : "desc"); }
   };
-  const caret = (key: IndustrySortKey) => sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : "";
+  const caret = (key: IndustrySortKey) => <span className={`hl-arrow${sortKey === key ? " is-active" : ""}`} aria-hidden="true">{sortKey === key ? (sortDir === "desc" ? "▼" : "▲") : "↕"}</span>;
   const rating = (value: number | null) => value === null ? "—" : faOneDecimal.format(value);
-  return <article className="highlight-card industry-card">
-    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">⇧</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
-    <p className="holder-highlight-status">{sessions !== undefined ? `۱۵ گروه اول · جمع ${faI.format(sessions)} جلسه معاملاتی` : "۱۵ گروه اول بر پایه خالص ورود پول حقیقی"} · {faI.format(rows.length)} گروه{loading ? " · در حال بروزرسانی…" : ""}{fetchedAt ? ` · ${faDT.format(new Date(fetchedAt))}` : ""}</p>
-    <div className="industry-actions">
-      <button className={`industry-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
-      {note && <span className="industry-note">{note}</span>}
-    </div>
-    {helpOpen && <div className="industry-formulas">
+  const done = progress ? Math.round((progress.done / Math.max(1, progress.total)) * 100) : 0;
+  return <article className="highlight-card industry-card hl-card">
+    <header className="hl-head">
+      <div className="hl-head-main"><span className="highlight-number">{number}</span><span className="highlight-icon hl-icon" aria-hidden="true">⇧</span><div className="hl-head-text"><h3 title={title}>{title}</h3><p title={subtitle}>{subtitle}</p></div></div>
+      <div className="hl-tools"><span className="hl-chip holder-highlight-status">{sessions !== undefined ? `۱۵ گروه اول · جمع ${faI.format(sessions)} جلسه معاملاتی` : "۱۵ گروه اول بر پایه خالص ورود پول حقیقی"} · {faI.format(rows.length)} گروه{loading ? " · در حال بروزرسانی…" : ""}{fetchedAt ? ` · ${faDT.format(new Date(fetchedAt))}` : ""}</span>
+        <button className={`industry-help hl-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
+      </div>
+    </header>
+    {note && <p className="industry-note hl-note">{note}</p>}
+    {helpOpen && <div className="industry-formulas hl-formulas">
       <p>ورود پول = Σ (حجم خرید حقیقی − حجم فروش حقیقی) × قیمت پایانی همان نماد.</p>
       <p>ارزش معاملات = Σ ارزش معاملات نمادهای صنعت.</p>
       <p>قدرت خرید = (Σ ارزش خرید حقیقی ÷ Σ تعداد خریدار حقیقی) ÷ (Σ ارزش فروش حقیقی ÷ Σ تعداد فروشنده حقیقی)؛ میانگین نسبت نمادها گرفته نمی‌شود.</p>
       <p>نمادهای روز اول معامله و نمادهایی با تغییر بیرون از ±۵۰٪ در جمع نمی‌آیند؛ صندوق‌ها بر پایه نوع صندوق تفکیک شده‌اند.</p>
     </div>}
-    {progress && <p className="industry-progress" role="status">{progress.phase === "prices" ? "دریافت تاریخچه قیمت" : "دریافت داده حقیقی جلسه‌ها"}: {faI.format(progress.done)} از {faI.format(progress.total)}</p>}
-    <div className="table-wrap highlight-table industry-table"><table aria-label={title}><thead><tr>
-      <th><button type="button" className="industry-sort" onClick={() => sortBy("name")}>گروه{caret("name")}</button></th>
-      <th><button type="button" className="industry-sort" onClick={() => sortBy("net")}>ورود پول (تومان){caret("net")}</button></th>
-      <th><button type="button" className="industry-sort" onClick={() => sortBy("value")}>ارزش معاملات (تومان){caret("value")}</button></th>
-      <th><button type="button" className="industry-sort" onClick={() => sortBy("buyPower")}>قدرت خرید{caret("buyPower")}</button></th>
-    </tr></thead><tbody>{shown.map((row) => <tr key={`${row.code}-${row.name}`}>
-      <td><strong title={row.name}>{shortIndustryName(row.name)}</strong><small>{faI.format(row.symbols)} نماد</small></td>
-      <td><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"} dir="ltr">{compactToman(row.net)}</strong></td>
+    {progress && <div className="hl-progress" role="status"><span className="hl-progress-bar" style={{ width: `${Math.min(100, Math.max(4, done))}%` }} /><p>{progress.phase === "prices" ? "دریافت تاریخچه قیمت" : "دریافت داده حقیقی جلسه‌ها"}: {faI.format(progress.done)} از {faI.format(progress.total)}</p></div>}
+    <div className="table-wrap highlight-table industry-table hl-table"><table aria-label={title}><thead><tr>
+      <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("name")}>گروه{caret("name")}</button></th>
+      <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("net")}>ورود پول (تومان){caret("net")}</button></th>
+      <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("value")}>ارزش معاملات (تومان){caret("value")}</button></th>
+      <th><button type="button" className="industry-sort hl-sort" onClick={() => sortBy("buyPower")}>قدرت خرید{caret("buyPower")}</button></th>
+    </tr></thead><tbody>{loading && !shown.length ? <SkeletonRows columns={4} /> : shown.map((row) => <tr key={`${row.code}-${row.name}`}>
+      <td><strong className="hl-clamp" title={row.name}>{shortIndustryName(row.name)}</strong><small>{faI.format(row.symbols)} نماد</small></td>
+      <td className="hl-primary"><strong className={(row.net ?? 0) < 0 ? "negative" : "positive"} dir="ltr">{compactToman(row.net)}</strong></td>
       <td><strong dir="ltr">{compactToman(row.value)}</strong></td>
       <td><strong dir="ltr" className={row.buyPower === null ? "muted" : row.buyPower >= 1 ? "positive" : "negative"}>{rating(row.buyPower)}</strong></td>
     </tr>)}</tbody></table></div>
-    {error && <p className="scan-error" role="alert">جمع صنعت‌ها دریافت نشد: {error}{onRetry && <button className="source-chip" type="button" disabled={loading} onClick={onRetry}>تلاش مجدد</button>}</p>}
-    {!shown.length && <div className="highlight-empty">{loading ? "در حال دریافت جمع صنعت‌ها…" : error || emptyText}</div>}
+    {error && <p className="scan-error hl-error" role="alert">جمع صنعت‌ها دریافت نشد: {error}</p>}
+    {!shown.length && !loading && <div className="highlight-empty hl-empty"><span>{error || emptyText}</span>{onRetry && <button className="hl-retry" type="button" onClick={onRetry}>تلاش دوباره</button>}</div>}
   </article>;
 }
 
@@ -2158,28 +2178,43 @@ export default function ScreenerClient() {
         {highlights.some((row) => !row.floorVerified) && <p className="partial-data-note">کف مجاز همان روز برای بعضی نمادها تأیید نشد؛ آن‌ها وارد فیلتر بازگشت از کف مجاز نمی‌شوند.</p>}
       </div>
       <p className="partial-data-note" role="status">پوشش از {faI.format(coverage.requested)} نماد: قیمت تاریخ‌دار {faI.format(coverage.datedPrices)}، حجم {faI.format(coverage.volume)}، ارزش معاملات {faI.format(coverage.value)}، حجم حقیقی {faI.format(coverage.clientType)}، ارزش حقیقی {faI.format(coverage.realValues)}، کف مجاز {faI.format(coverage.floor)}؛ دریافت‌نشده {faI.format(coverage.unreceived)}، دادهٔ قبلی {faI.format(coverage.cached)}.</p>
-      <div className="highlight-grid">
+      <div className="hl-groups">
+        <section className="hl-group" aria-label="جریان پول صنعت‌ها">
+          <h3 className="hl-group-title">جریان پول صنعت‌ها</h3>
+          <div className="hl-grid">
         <IndustryFlowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <IndustryFlowCard number="۲" title={industrySessions >= 3 ? "ورود پول به صنعت (۳ روزه)" : `ورود پول به صنعت (جمع ${faI.format(industrySessions)} جلسه)`} subtitle={industrySessions >= 3 ? "جمع ۳ جلسه آخر معاملاتی به تفکیک صنعت" : "۳ جلسه کامل نشده؛ ارقام جمع جلسه‌های ثبت‌شده است"} sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} progress={backfillProgress} emptyText="برای جمع چندروزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
-        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
+          </div>
+        </section>
+        <section className="hl-group" aria-label="پول حقیقی و سهامداران عمده">
+          <h3 className="hl-group-title">پول حقیقی و سهامداران عمده</h3>
+          <div className="hl-grid">
+        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران عمده با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" wide loading={highlightHoldingsLoading} columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
           "ارزش تغییر = تغییر تعداد سهم × قیمت پایانی همان جلسه ÷ ۱۰ (واحد: تومان).",
           "هر ردیف یک سهامدار عمده (حقیقی و حقوقی) با نام خودش در یک نماد است که تعداد سهامش نسبت به جلسه قبل تغییر کرده؛ کاهش‌ها قرمز نمایش داده می‌شوند.",
           "منبع، تغییرات سهامداران عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
         ]} error={highlightHoldingsError} status={`${highlightHoldingsLoading ? "در حال دریافت… · " : ""}تاریخ تغییرات: ${fmtDate(highlightHoldings?.sourceDate)}${highlightHoldings?.fallback ? " · داده پشتیبان" : ""}${highlightHoldings?.partial ? " · اسکن ناقص" : ""}`} emptyText={highlightHoldingsLoading ? "در حال دریافت تغییرات سهامداران…" : "داده تغییرات سهامداران برای این فهرست در دسترس نیست."} />
-        <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" help={[
+        <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" loading={highlightsLoading} help={[
           "ورود پول = ارزش خرید حقیقی − ارزش فروش حقیقی همان جلسه (تومان).",
           "ارزش معاملات = ارزش کل معاملات نماد در همان جلسه (تومان).",
           "سرانه خرید = ارزش خرید حقیقی ÷ تعداد خریدار حقیقی؛ اگر از سرانه فروش حقیقی کمتر باشد قرمز و در غیر این صورت سبز است.",
         ]} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
-        <RankedTableCard number="۵" title="بیشترین ورود پول حقیقی (هفتگی)" subtitle="جمع خالص ارزش خرید حقیقی ۵ جلسه آخر" icon="↗" columns={REAL_MONEY_COLUMNS} rows={weeklyRowsRanked} defaultSort="inflow" progress={weeklyProgress ? `دریافت تاریخچه: ${faI.format(weeklyProgress.done)} از ${faI.format(weeklyProgress.total)} نماد${weeklyLoading ? "…" : ""}` : undefined} help={[
+        <RankedTableCard number="۵" title="بیشترین ورود پول حقیقی (هفتگی)" subtitle="جمع خالص ارزش خرید حقیقی ۵ جلسه آخر" icon="↗" columns={REAL_MONEY_COLUMNS} rows={weeklyRowsRanked} defaultSort="inflow" loading={weeklyLoading} progress={weeklyProgress ? `دریافت تاریخچه: ${faI.format(weeklyProgress.done)} از ${faI.format(weeklyProgress.total)} نماد${weeklyLoading ? "…" : ""}` : undefined} help={[
           "ورود پول = جمع (ارزش خرید حقیقی − ارزش فروش حقیقی) ۵ جلسه آخر معاملاتی (تومان).",
           "ارزش معاملات = جمع ارزش معاملات همان ۵ جلسه؛ قیمت‌ها و تاریخ همیشه مربوط به آخرین جلسه‌اند.",
           "سرانه خرید = جمع ارزش خرید حقیقی ÷ جمع تعداد خریدار حقیقی ۵ جلسه؛ رنگ آن با سرانه فروش همان بازه مقایسه می‌شود.",
           "جلسه‌ای که نماد معامله نشده در شمارش نمی‌آید؛ نماد با تاریخچه ناقص برچسب «X از ۵ جلسه» می‌گیرد.",
         ]} emptyText={weeklyLoading ? "در حال ساخت جمع ۵ جلسه آخر…" : "داده کافی برای جمع ۵ جلسه آخر در دسترس نیست."} />
-        <HighlightCard number="۶" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
-        <HighlightCard number="۷" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
-        <ReversalHighlightCard rows={highlightGroups.reversals} emptyText={emptyDataMessage("floor", coverage.floor, coverage.requested)} />
+          </div>
+        </section>
+        <section className="hl-group" aria-label="معاملات و صف‌ها">
+          <h3 className="hl-group-title">معاملات و صف‌ها</h3>
+          <div className="hl-grid">
+        <HighlightCard number="۶" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" loading={highlightsLoading} rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
+        <HighlightCard number="۷" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" loading={highlightsLoading} rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
+        <ReversalHighlightCard loading={highlightsLoading} rows={highlightGroups.reversals} emptyText={emptyDataMessage("floor", coverage.floor, coverage.requested)} />
+          </div>
+        </section>
       </div>
       <footer className="panel-foot"><span>{faI.format(highlights.length)} نماد از فهرست {scopeLabel(highlightScope)}</span><span>{highlightsUpdatedAt ? `آخرین بروزرسانی: ${faDT.format(highlightsUpdatedAt)}` : "برای دریافت رتبه‌ها، بروزرسانی را بزن."}</span></footer>
     </section>;
