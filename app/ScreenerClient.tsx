@@ -1,7 +1,7 @@
 "use client";
 
-import { ChangeEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { compactSharesEn, groupHolderRowsBySymbol, signedSharesEn, toggleSymbolInSet } from "./lib/format";
+import { ChangeEvent, Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { compactSharesEn, compactSharesFa, groupHolderRowsBySymbol, holderChangeValueToman, signedSharesEn, toggleSymbolInSet } from "./lib/format";
 import { fetchWithTimeout, readApiJson, withDeadline, loadBatches } from "./lib/request-lifecycle";
 import { requestData } from "./lib/data-client";
 import { inspectWorkerEdgeResponse, ScreenerWorkerCircuitBreaker } from "./lib/worker-edge-diagnostics";
@@ -38,7 +38,7 @@ import {
 } from "./lib/industry-symbols";
 import { backfillIndustryHistory, type BackfillProgress, type HistorySymbol } from "./lib/industry-history";
 import { MARKET_WATCH_PATH } from "./lib/market-watch";
-import { loadWeeklyInflow, rankWeeklyInflow, type WeeklySymbolResult } from "./lib/weekly-real-money";
+import { loadWeeklyInflow, type WeeklySymbolResult } from "./lib/weekly-real-money";
 import {
   closingPriceGap,
   isSellQueueToPositive,
@@ -318,16 +318,132 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progres
 
 function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; emptyText: string }) {
   return <article className="highlight-card reversal-highlight-card">
-    <header>      <div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۷</span></header>
-    <div className="reversal-table-head" aria-hidden="true">
-      <span>نماد</span><span>آخر (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span>
+    <header>      <div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۸</span></header>
+    <div className="reversal-table-head">
+      <span>نماد</span><span>آخرین معامله (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span><span>تاریخ</span>
     </div>
     <ol>{rows.map((row) => <li key={row.symbol}>
-      <span className="reversal-symbol" title={`تاریخ ${fmtDate(row.sessionDate)} · کمترین معامله ${fp(row.priceMin)} · کف مجاز ${fp(row.allowedMin)}`}><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="reversal-date">{fmtDate(row.sessionDate)}</small></span>
+      <span className="reversal-symbol" title={`کمترین معامله ${fp(row.priceMin)} · کف مجاز ${fp(row.allowedMin)}`}><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /></span>
       <span className="reversal-value"><strong>{fp(row.priceLast)}</strong><small className="positive">{pct(row.lastChangePct)}</small></span>
       <span className="reversal-value"><strong>{fp(row.priceClose)}</strong><small className="negative">{pct(row.closeChangePct)}</small></span>
       <span className="reversal-value">{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}<small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></span>
+      <span className="reversal-date">{fmtDate(row.sessionDate)}</span>
     </li>)}</ol>
+    {!rows.length && <div className="highlight-empty">{emptyText}</div>}
+  </article>;
+}
+
+type RankedColumn = { key: string; label: string; title?: string };
+type RankedRow = { key: string; sort: Record<string, number | string | null>; cells: Record<string, ReactNode> };
+
+const rankPriceColumns: RankedColumn[] = [
+  { key: "last", label: "آخرین معامله (ریال)" },
+  { key: "close", label: "پایانی (ریال)" },
+  { key: "gap", label: "اختلاف (%)", title: "اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰" },
+  { key: "date", label: "تاریخ" },
+];
+
+const HOLDER_VALUE_COLUMNS: RankedColumn[] = [
+  { key: "symbol", label: "نماد" },
+  { key: "holder", label: "نام سهامدار" },
+  { key: "change", label: "تغییرات" },
+  { key: "value", label: "ارزش (تومان)" },
+  ...rankPriceColumns,
+];
+
+const REAL_MONEY_COLUMNS: RankedColumn[] = [
+  { key: "symbol", label: "نماد" },
+  { key: "perBuyer", label: "سرانه خرید" },
+  { key: "tradeValue", label: "ارزش معاملات (تومان)" },
+  { key: "inflow", label: "ورود پول (تومان)" },
+  ...rankPriceColumns,
+];
+
+const rankSymbolCell = (row: MarketHighlight) => (
+  <span className="rank-symbol">
+    <a className="rank-symbol-link" href={`https://tsetmc.com/instInfo/${encodeURIComponent(row.insCode)}`} target="_blank" rel="noopener noreferrer">{row.symbol}</a>
+    {row.name && <small>{row.name}</small>}
+  </span>
+);
+
+/** The four price columns every ranked card ends with (Rial, Persian digits). */
+function rankPriceCells(row: MarketHighlight, date?: number | null) {
+  const gap = closingPriceGap(row.priceLast, row.priceClose);
+  const sessionDate = date ?? row.sessionDate ?? null;
+  return {
+    cells: {
+      last: <strong>{fp(row.priceLast)}</strong>,
+      close: <strong>{fp(row.priceClose)}</strong>,
+      gap: <strong className={gap === null ? "muted" : gap.percent >= 0 ? "positive" : "negative"}>{pct(gap?.percent)}</strong>,
+      date: <span className="row-date">{fmtDate(sessionDate)}</span>,
+    },
+    sort: {
+      last: row.priceLast || null,
+      close: row.priceClose || null,
+      gap: gap?.percent ?? null,
+      date: sessionDate,
+    },
+  };
+}
+
+/**
+ * Compressed, sortable table of cards 3–5. It reuses the industry cards'
+ * classes (blue header, sort arrows, ? formula box, fixed height) so the three
+ * ranked cards look identical to cards 1 and 2, and shows the first twenty
+ * rows of whichever column the reader picks.
+ */
+function RankedTableCard({ number, title, subtitle, icon, columns, rows, defaultSort, help, progress, status, error, emptyText }: {
+  number: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+  columns: RankedColumn[];
+  rows: RankedRow[];
+  defaultSort: string;
+  help: string[];
+  progress?: string;
+  status?: string;
+  error?: string;
+  emptyText: string;
+}) {
+  const [sortKey, setSortKey] = useState(defaultSort);
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const shown = useMemo(() => {
+    const direction = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const left = a.sort[sortKey] ?? null;
+      const right = b.sort[sortKey] ?? null;
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      const order = typeof left === "string" || typeof right === "string"
+        ? String(left).localeCompare(String(right), "fa")
+        : Number(left) - Number(right);
+      return direction * order;
+    }).slice(0, 20);
+  }, [rows, sortKey, sortDir]);
+  const sortBy = (key: string) => {
+    if (sortKey === key) setSortDir((current) => current === "desc" ? "asc" : "desc");
+    else { setSortKey(key); setSortDir(key === "symbol" || key === "holder" ? "asc" : "desc"); }
+  };
+  const caret = (key: string) => sortKey === key ? (sortDir === "desc" ? " ▼" : " ▲") : "";
+  return <article className="highlight-card ranked-card">
+    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">{icon}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
+    {status && <p className="holder-highlight-status">{status}</p>}
+    <div className="industry-actions">
+      <button className={`industry-help ${helpOpen ? "active" : ""}`} type="button" aria-expanded={helpOpen} title="فرمول محاسبه" onClick={() => setHelpOpen((value) => !value)}>؟</button>
+    </div>
+    {helpOpen && <div className="industry-formulas">{help.map((line) => <p key={line}>{line}</p>)}</div>}
+    {progress && <p className="industry-progress" role="status">{progress}</p>}
+    {error && <p className="scan-error" role="alert">{error}{rows.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : ""}</p>}
+    <div className="table-wrap highlight-table industry-table ranked-table"><table aria-label={title}><thead><tr>
+      {columns.map((column) => <th key={column.key}>
+        <button type="button" className="industry-sort" title={column.title} onClick={() => sortBy(column.key)}>{column.label}{caret(column.key)}</button>
+      </th>)}
+    </tr></thead><tbody>
+      {shown.map((row) => <tr key={row.key}>{columns.map((column) => <td key={column.key}>{row.cells[column.key]}</td>)}</tr>)}
+    </tbody></table></div>
     {!rows.length && <div className="highlight-empty">{emptyText}</div>}
   </article>;
 }
@@ -424,8 +540,6 @@ export default function ScreenerClient() {
   const [highlightScope, setHighlightScope] = useState<WatchlistScope>("haghighi");
   const [increaseScope, setIncreaseScope] = useState<HolderScope>("market");
   const [holderIncreasesOpen, setHolderIncreasesOpen] = useState<Set<string>>(new Set());
-  const [highlightOpenGroups, setHighlightOpenGroups] = useState<Set<string>>(new Set());
-  const [showAllHighlightHolders, setShowAllHighlightHolders] = useState(false);
   const [highlightsError, setHighlightsError] = useState("");
   const [increaseError, setIncreaseError] = useState("");
   const [increaseScanned, setIncreaseScanned] = useState(false);
@@ -1824,10 +1938,6 @@ export default function ScreenerClient() {
     setHolderIncreasesOpen((prev) => toggleSymbolInSet(prev, symbol));
   };
 
-  const toggleHighlightGroup = (symbol: string) => {
-    setHighlightOpenGroups((prev) => toggleSymbolInSet(prev, symbol));
-  };
-
   const highlightGroups = useMemo(() => {
     // A few commodity funds can trade on Thursday while ordinary shares are
     // closed. Rank the dominant dated session, never silently mix sessions.
@@ -1841,14 +1951,11 @@ export default function ScreenerClient() {
     const volumes: HighlightListRow[] = top(sessionRows.filter(row => row.volumeAvailable), (row) => row.volume).map((row) => ({
       ...row, primary: `${faCompact.format(row.volume)} سهم`, secondary: `ارزش ${faCompact.format(row.value)} ریال`,
     }));
-    const realMoney: HighlightListRow[] = top(sessionRows.filter(row => row.clientTypeAvailable && row.clientTypeDate === latest && row.realBuyValue != null && row.realSellValue != null), (row) => row.realBuyValue! - row.realSellValue!).map((row) => ({
-      ...row, primary: `${faCompact.format(row.realBuyValue! - row.realSellValue!)} ریال`, secondary: `قدرت خالص پول حقیقی`,
-    }));
     const reversals = [...sessionRows]
       .filter(isSellQueueToPositive)
       .sort((a, b) => (closingPriceGap(b.priceLast, b.priceClose)?.percent ?? 0) - (closingPriceGap(a.priceLast, a.priceClose)?.percent ?? 0))
       .slice(0, 10);
-    return { values, volumes, realMoney, reversals, sessionDate: latest, rankedSymbols: sessionRows.length };
+    return { values, volumes, reversals, sessionRows, sessionDate: latest, rankedSymbols: sessionRows.length };
   }, [highlights]);
 
   const topIndustries = useMemo(() => industries.slice(0, 15), [industries]);
@@ -1908,38 +2015,81 @@ export default function ScreenerClient() {
     })();
   }, [activeTab, highlights, highlightsLoading, highlightGroups.sessionDate, highlightScope]);
 
-  const weeklyRows = useMemo<HighlightListRow[]>(() => {
-    const bySymbol = new Map(highlights
-      .filter((row) => row.sessionDate === highlightGroups.sessionDate)
-      .map((row) => [row.symbol, row]));
-    return rankWeeklyInflow(weeklyMoney, 10).flatMap((entry) => {
-      const row = bySymbol.get(entry.symbol);
-      if (!row) return [];
-      const oldest = entry.dates[entry.dates.length - 1];
-      const newest = entry.dates[0];
+  // The dominant session's rows, keyed by symbol; every ranked card prices its
+  // own rows from these quotes instead of issuing new price requests.
+  const sessionRowsBySymbol = useMemo(() => new Map(highlightGroups.sessionRows.map((row) => [row.symbol, row])), [highlightGroups.sessionRows]);
+
+  // Card 3: one row per shareholder record whose share count changed. Value is
+  // shares × closing price ÷ 10 (Toman); records without a usable price cannot
+  // be ranked by value and are left out.
+  const holderValueRows = useMemo<RankedRow[]>(() => {
+    return (highlightHoldings?.rows ?? []).flatMap((holder) => {
+      const quote = sessionRowsBySymbol.get(holder.symbol);
+      if (!quote) return [];
+      const valueToman = holderChangeValueToman(holder.changeShares, quote.priceClose);
+      if (valueToman === null) return [];
+      const price = rankPriceCells(quote);
       return [{
-        ...row,
-        primary: `${faCompact.format(entry.net)} ریال`,
-        secondary: entry.coverageLabel ?? `جمع ${faI.format(entry.covered)} جلسه`,
-        sessionRange: oldest && newest && oldest !== newest ? `${fmtDate(oldest)} تا ${fmtDate(newest)}` : fmtDate(newest ?? row.sessionDate),
-        coverageLabel: entry.coverageLabel,
+        key: holder.id,
+        sort: { symbol: holder.symbol, holder: holder.symbol, change: holder.changeShares, value: valueToman, ...price.sort },
+        cells: {
+          symbol: rankSymbolCell(quote),
+          holder: <span className="rank-holder-name">شخص حقیقی</span>,
+          change: <strong dir="ltr" className={holder.changeShares > 0 ? "positive" : holder.changeShares < 0 ? "negative" : "muted"}>
+            {holder.changeShares > 0 ? "+" : holder.changeShares < 0 ? "−" : ""}{compactSharesFa(Math.abs(holder.changeShares))}
+          </strong>,
+          // compactToman takes Rial; ×10 turns the Toman value back into Rial.
+          value: <strong className={valueToman > 0 ? "positive" : valueToman < 0 ? "negative" : "muted"}>{compactToman(valueToman * 10)}</strong>,
+          ...price.cells,
+        },
       }];
     });
-  }, [weeklyMoney, highlights, highlightGroups.sessionDate]);
+  }, [highlightHoldings, sessionRowsBySymbol]);
 
-  // Holders grouped by SYMBOL for the card: one parent row per symbol with
-  // every real-person record preserved as a separate child (client spec:
-  // each person shown vertically underneath, never aggregated/deduplicated).
-  // ownershipPct from the API is already a percent (holder-records.ts ×100) —
-  // display it as-is; the earlier ×100 here produced impossible values >100.
-  const allHighlightHoldingGroups = useMemo(() => {
-    return groupHolderRowsBySymbol((highlightHoldings?.rows ?? []).map((r) => ({
-      ...r, key: r.id, currentCompact: compactSharesEn(r.currentShares),
-      signedChange: signedSharesEn(r.changeShares),
-      ownershipText: r.ownershipPct === null ? null : faN.format(r.ownershipPct),
-    }))).map((group) => ({ ...group, children: group.children.map((child, index) => ({ ...child, label: `شخص حقیقی ${faI.format(index + 1)}` })) }));
-  }, [highlightHoldings]);
-  const highlightHoldingGroups = showAllHighlightHolders ? allHighlightHoldingGroups : allHighlightHoldingGroups.slice(0, 20);
+  // Card 4: the daily real-money ranking with the buyer's per-capita purchase.
+  const dailyMoneyRows = useMemo<RankedRow[]>(() => {
+    return highlightGroups.sessionRows.flatMap((row) => {
+      if (!row.clientTypeAvailable || row.clientTypeDate !== highlightGroups.sessionDate) return [];
+      if (row.realBuyValue === null || row.realBuyValue === undefined) return [];
+      if (row.realSellValue === null || row.realSellValue === undefined) return [];
+      const net = row.realBuyValue - row.realSellValue;
+      const perBuyer = row.realBuyCount > 0 ? row.realBuyValue / row.realBuyCount : null;
+      const perSeller = row.realSellCount > 0 ? row.realSellValue / row.realSellCount : null;
+      const price = rankPriceCells(row);
+      return [{
+        key: row.symbol,
+        sort: { symbol: row.symbol, perBuyer, tradeValue: row.valueAvailable === false ? null : row.value, inflow: net, ...price.sort },
+        cells: {
+          symbol: rankSymbolCell(row),
+          perBuyer: <strong dir="ltr" className={perBuyer === null || perSeller === null ? "muted" : perBuyer >= perSeller ? "positive" : "negative"}>{perBuyer === null ? "—" : compactToman(perBuyer)}</strong>,
+          tradeValue: <strong dir="ltr">{row.valueAvailable === false ? "—" : compactToman(row.value)}</strong>,
+          inflow: <strong dir="ltr" className={net < 0 ? "negative" : "positive"}>{compactToman(net)}</strong>,
+          ...price.cells,
+        },
+      }];
+    });
+  }, [highlightGroups]);
+
+  // Card 5: the same columns over the five-session window; price columns and
+  // the date always describe the last session.
+  const weeklyRowsRanked = useMemo<RankedRow[]>(() => {
+    return weeklyMoney.flatMap((entry) => {
+      const quote = sessionRowsBySymbol.get(entry.symbol);
+      if (!quote) return [];
+      const price = rankPriceCells(quote);
+      return [{
+        key: entry.symbol,
+        sort: { symbol: entry.symbol, perBuyer: entry.perBuyer, tradeValue: entry.value || null, inflow: entry.net, ...price.sort },
+        cells: {
+          symbol: <span className="rank-symbol">{rankSymbolCell(quote)}{entry.coverageLabel && <small className="weekly-coverage">{entry.coverageLabel}</small>}</span>,
+          perBuyer: <strong dir="ltr" className={entry.perBuyer === null || entry.perSeller === null ? "muted" : entry.perBuyer >= entry.perSeller ? "positive" : "negative"}>{entry.perBuyer === null ? "—" : compactToman(entry.perBuyer)}</strong>,
+          tradeValue: <strong dir="ltr">{entry.value > 0 ? compactToman(entry.value) : "—"}</strong>,
+          inflow: <strong dir="ltr" className={entry.net < 0 ? "negative" : "positive"}>{compactToman(entry.net)}</strong>,
+          ...price.cells,
+        },
+      }];
+    });
+  }, [weeklyMoney, sessionRowsBySymbol]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // TAB CONTENT RENDERERS
@@ -1986,7 +2136,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ پنج کارت بعدی ۱۰ نماد برتر را نشان می‌دهند (ورود پول حقیقی روزانه و هفتگی، ارزش و حجم معاملات و بازگشت از صف فروش)؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ کارت سوم ۲۰ سهامدار حقیقی را با بیشترین ارزش تغییر تعداد سهم نشان می‌دهد؛ کارت‌های چهارم و پنجم ۲۰ نماد با بیشترین ورود پول حقیقی روزانه و جمع ۵ جلسه آخر را مرتب می‌کنند و کارت‌های ششم تا هشتم ۱۰ نماد برتر ارزش معاملات، حجم معاملات و بازگشت از صف فروش را نشان می‌دهند.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -1999,55 +2149,25 @@ export default function ScreenerClient() {
       <div className="highlight-grid">
         <IndustryFlowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <IndustryFlowCard number="۲" title={industrySessions >= 3 ? "ورود پول به صنعت (۳ روزه)" : `ورود پول به صنعت (جمع ${faI.format(industrySessions)} جلسه)`} subtitle={industrySessions >= 3 ? "جمع ۳ جلسه آخر معاملاتی به تفکیک صنعت" : "۳ جلسه کامل نشده؛ ارقام جمع جلسه‌های ثبت‌شده است"} sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} progress={backfillProgress} emptyText="برای جمع چندروزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
-        <HighlightCard number="۳" title="بیشترین ورود پول حقیقی روزانه" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" rows={highlightGroups.realMoney} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
-        <HighlightCard number="۴" title="بیشترین ورود پول حقیقی هفتگی" subtitle="جمع خالص ارزش خرید حقیقی ۵ جلسه آخر" icon="↗" rows={weeklyRows} progress={weeklyProgress ? `دریافت تاریخچه: ${faI.format(weeklyProgress.done)} از ${faI.format(weeklyProgress.total)} نماد${weeklyLoading ? "…" : ""}` : undefined} emptyText={weeklyLoading ? "در حال ساخت جمع ۵ جلسه آخر…" : "داده کافی برای جمع ۵ جلسه آخر در دسترس نیست."} />
-        <HighlightCard number="۵" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
-        <HighlightCard number="۶" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
+        <RankedTableCard number="۳" title="بیشترین ارزش تغییرات سهامدار عمده" subtitle="سهامداران حقیقی با بیشترین ارزش تغییر تعداد سهم نسبت به جلسه قبل" icon="↕" columns={HOLDER_VALUE_COLUMNS} rows={holderValueRows} defaultSort="value" help={[
+          "ارزش تغییر = تغییر تعداد سهم × قیمت پایانی همان جلسه ÷ ۱۰ (واحد: تومان).",
+          "هر ردیف یک سهامدار حقیقی در یک نماد است که تعداد سهامش نسبت به جلسه قبل تغییر کرده؛ کاهش‌ها قرمز نمایش داده می‌شوند.",
+          "منبع، تغییرات سهامداران حقیقی عمده را برای پنج جلسه آخر منتشر می‌کند؛ این کارت جلسه تغییر را با قیمت پایانی همان جلسه ارزش‌گذاری می‌کند.",
+        ]} error={highlightHoldingsError} status={`${highlightHoldingsLoading ? "در حال دریافت… · " : ""}تاریخ تغییرات: ${fmtDate(highlightHoldings?.sourceDate)}${highlightHoldings?.fallback ? " · داده پشتیبان" : ""}${highlightHoldings?.partial ? " · اسکن ناقص" : ""}`} emptyText={highlightHoldingsLoading ? "در حال دریافت تغییرات سهامداران…" : "داده تغییرات سهامداران برای این فهرست در دسترس نیست."} />
+        <RankedTableCard number="۴" title="بیشترین ورود پول حقیقی (روزانه)" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" columns={REAL_MONEY_COLUMNS} rows={dailyMoneyRows} defaultSort="inflow" help={[
+          "ورود پول = ارزش خرید حقیقی − ارزش فروش حقیقی همان جلسه (تومان).",
+          "ارزش معاملات = ارزش کل معاملات نماد در همان جلسه (تومان).",
+          "سرانه خرید = ارزش خرید حقیقی ÷ تعداد خریدار حقیقی؛ اگر از سرانه فروش حقیقی کمتر باشد قرمز و در غیر این صورت سبز است.",
+        ]} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
+        <RankedTableCard number="۵" title="بیشترین ورود پول حقیقی (هفتگی)" subtitle="جمع خالص ارزش خرید حقیقی ۵ جلسه آخر" icon="↗" columns={REAL_MONEY_COLUMNS} rows={weeklyRowsRanked} defaultSort="inflow" progress={weeklyProgress ? `دریافت تاریخچه: ${faI.format(weeklyProgress.done)} از ${faI.format(weeklyProgress.total)} نماد${weeklyLoading ? "…" : ""}` : undefined} help={[
+          "ورود پول = جمع (ارزش خرید حقیقی − ارزش فروش حقیقی) ۵ جلسه آخر معاملاتی (تومان).",
+          "ارزش معاملات = جمع ارزش معاملات همان ۵ جلسه؛ قیمت‌ها و تاریخ همیشه مربوط به آخرین جلسه‌اند.",
+          "سرانه خرید = جمع ارزش خرید حقیقی ÷ جمع تعداد خریدار حقیقی ۵ جلسه؛ رنگ آن با سرانه فروش همان بازه مقایسه می‌شود.",
+          "جلسه‌ای که نماد معامله نشده در شمارش نمی‌آید؛ نماد با تاریخچه ناقص برچسب «X از ۵ جلسه» می‌گیرد.",
+        ]} emptyText={weeklyLoading ? "در حال ساخت جمع ۵ جلسه آخر…" : "داده کافی برای جمع ۵ جلسه آخر در دسترس نیست."} />
+        <HighlightCard number="۶" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
+        <HighlightCard number="۷" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
         <ReversalHighlightCard rows={highlightGroups.reversals} emptyText={emptyDataMessage("floor", coverage.floor, coverage.requested)} />
-        <article className="highlight-card holder-highlight-card">
-          <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↗</span><div><h3>تغییرات سهامدار حقیقی</h3><p>هر ردیف یک سهامدار عمده حقیقی با افزایش سهم</p></div></div><span className="highlight-number">۸</span></header>
-          <p className="holder-highlight-status">{highlightHoldingsLoading ? "در حال دریافت… " : ""}تاریخ تغییرات: {fmtDate(highlightHoldings?.sourceDate)}{highlightHoldings?.fallback ? " · داده پشتیبان" : ""}{highlightHoldings?.partial ? " · اسکن ناقص" : ""}{highlightHoldings?.fetchedAt ? ` · ${highlightHoldings.fallback ? "زمان ثبت نسخه پشتیبان" : "زمان دریافت"}: ${faDT.format(new Date(highlightHoldings.fetchedAt))}` : ""}</p>
-          {!highlightHoldingsLoading && highlightHoldings?.partial && highlightHoldings.rows.length > 0 && <p className="partial-data-note">فعلاً {faI.format(groupHolderRowsBySymbol(highlightHoldings.rows).length)} نماد دارای افزایش تأییدشده دریافت شده است. چون دریافت ناقص بوده، این عدد تعداد کل افزایش‌ها در فهرست نیست.</p>}
-          {highlightHoldings?.partial && highlightHoldings.warning && <p className="partial-data-note">{highlightHoldings.warning}</p>}
-          {allHighlightHoldingGroups.length > 0 && <p className="holder-highlight-status" role="status">نمایش {faI.format(highlightHoldingGroups.length)} نماد از {faI.format(allHighlightHoldingGroups.length)} نماد دارای افزایش سهم در داده دریافت‌شده؛ {highlightHoldings?.fallback ? "این نتایج تاریخی هستند و خرید امروز را تأیید نمی‌کنند." : "تاریخ و پوشش منبع را بررسی کنید."}</p>}
-          {highlightHoldings && <p className="holder-freshness warning-text" role="status">{holderFreshnessText(highlightHoldings, expectedDate())}</p>}
-          {highlightHoldingsError && <p className="scan-error" role="alert">{highlightHoldingsError}{highlightHoldings ? "؛ نتیجه قبلی همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
-          <div className="holder-groups"><table aria-label="تغییرات سهامدار حقیقی به تفکیک نماد"><tbody>
-            {highlightHoldingGroups.map((group) => {
-              const isOpen = highlightOpenGroups.has(group.symbol);
-              const representative = group.representative;
-              return [
-                <tr className="holder-group-head" key={`${group.id}-head`}>
-                  <td>
-                    <button className="holder-expand-button" aria-expanded={isOpen} type="button" onClick={() => toggleHighlightGroup(group.symbol)}>
-                      <strong>{group.symbol}</strong>
-                      <span className="holder-people-inline" title="تعداد سهامداران حقیقی عمده این نماد">{faI.format(group.people)} شخص حقیقی</span>
-                      <span className="holder-caret" aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
-                      <small className="holder-head-sub">{group.instrumentName}{group.market ? ` · ${group.market}` : ""}</small>
-                    </button>
-                    <CopySymbol symbol={group.symbol} />
-                  </td>
-                  <td><small>بیشترین دارنده · سهام فعلی</small><b dir="ltr">{representative.currentCompact}</b></td>
-                  <td><small>تغییر همان شخص</small><b dir="ltr" className="positive">{representative.signedChange}</b><small className="holder-date">{fmtDate(representative.date)}</small></td>
-                  <td><small>درصد مالکیت</small><OwnershipValue row={representative} /></td>
-                </tr>,
-                ...(isOpen ? group.children.map((child) => <tr key={child.key} className="holder-person-row">
-                  <td><span className="holder-person-name">{child.label}</span></td>
-                  <td><small>تعداد سهام فعلی</small><b dir="ltr">{child.currentCompact}</b></td>
-                  <td><small>{child.changeShares > 0 ? "افزایش سهم" : child.changeShares < 0 ? "کاهش سهم" : "بدون تغییر"}</small><b dir="ltr" className={child.changeShares > 0 ? "positive" : child.changeShares < 0 ? "negative" : ""}>{child.signedChange}</b></td>
-                  <td><small>درصد مالکیت</small><OwnershipValue row={child} /><small className="holder-date">{fmtDate(child.date)}</small></td>
-                </tr>) : []),
-              ];
-            })}
-          </tbody></table></div>
-          {allHighlightHoldingGroups.length > 20 && <div className="holder-highlight-more">
-            <button className="source-chip" type="button" aria-expanded={showAllHighlightHolders} onClick={() => setShowAllHighlightHolders((value) => !value)}>
-              {showAllHighlightHolders ? "نمایش ۲۰ نماد برتر" : `نمایش همه ${faI.format(allHighlightHoldingGroups.length)} نماد دریافت‌شده`}
-            </button>
-            <span>افزایش تعداد ردیف‌ها فقط داده‌های موجود را نمایش می‌دهد؛ اسکن زنده جدیدی انجام نمی‌شود.</span>
-          </div>}
-          {!highlightHoldingsLoading && !highlightHoldingsError && highlightHoldings && !highlightHoldings.rows.length && <div className="highlight-empty">{highlightHoldings.partial ? "دریافت ناقص است؛ نبود خرید قابل تأیید نیست." : "در جلسه این منبع افزایش سهمی برای این فهرست ثبت نشده است."}</div>}
-        </article>
       </div>
       <footer className="panel-foot"><span>{faI.format(highlights.length)} نماد از فهرست {scopeLabel(highlightScope)}</span><span>{highlightsUpdatedAt ? `آخرین بروزرسانی: ${faDT.format(highlightsUpdatedAt)}` : "برای دریافت رتبه‌ها، بروزرسانی را بزن."}</span></footer>
     </section>;

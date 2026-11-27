@@ -16,6 +16,27 @@ export function signedSharesEn(v: number): string {
   return v > 0 ? `+${compactSharesEn(v)}` : v < 0 ? `-${compactSharesEn(v)}` : compactSharesEn(v);
 }
 
+const faShort = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 1 });
+
+/** Persian-digit compact share count with the same M/B suffixes (۸۰M). */
+export function compactSharesFa(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e9) return `${sign}${faShort.format(abs / 1e9)}B`;
+  if (abs >= 1e6) return `${sign}${faShort.format(abs / 1e6)}M`;
+  return `${sign}${faShort.format(abs)}`;
+}
+
+/**
+ * Value of a shareholder's share change in Toman: shares × closing price ÷ 10,
+ * where the closing price is in Rial. null when the price is unusable.
+ */
+export function holderChangeValueToman(changeShares: number, closeRial: number | null | undefined): number | null {
+  if (!Number.isFinite(changeShares)) return null;
+  if (closeRial === null || closeRial === undefined || !Number.isFinite(closeRial) || closeRial <= 0) return null;
+  return changeShares * closeRial / 10;
+}
+
 export type GroupableHolderRow = {
   id: string; symbol: string; instrumentName: string; market: string;
   currentShares: number; changeShares: number; date: number;

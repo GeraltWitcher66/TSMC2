@@ -181,7 +181,7 @@ td > small.date-sub { color: #5c7078; font-size: 11.5px; font-weight: 800; white
 .highlight-metric small { color: #8a999f; font-size: 8px; white-space: nowrap; }
 .highlight-tag { grid-column: 2 / -1; justify-self: start; padding: 3px 7px; border-radius: 99px; color: var(--red); background: var(--red-soft); font-size: 8px; font-weight: 900; }
 .highlight-empty { min-height: 120px; display: grid; place-items: center; padding: 24px; color: #89989e; font-size: 11px; text-align: center; }
-.reversal-table-head, .reversal-highlight-card li { display: grid; grid-template-columns: minmax(74px, 1.15fr) repeat(3, minmax(52px, .78fr)); align-items: center; gap: 4px; }
+.reversal-table-head, .reversal-highlight-card li { display: grid; grid-template-columns: minmax(68px, 1.05fr) repeat(3, minmax(50px, .78fr)) minmax(62px, .82fr); align-items: center; gap: 4px; }
 .reversal-table-head { min-height: 40px; padding: 7px 9px; color: #74868d; background: #f7fafb; border-bottom: 1px solid var(--line); font-size: 8px; font-weight: 850; text-align: center; }
 .reversal-highlight-card li { min-height: 55px; padding: 8px 9px; text-align: center; }
 .reversal-symbol { overflow: hidden; color: var(--navy-800); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
@@ -364,7 +364,16 @@ td > small.date-sub { color: #5c7078; font-size: 11.5px; font-weight: 800; white
 .industry-table td:first-child strong { display: block; overflow: hidden; color: var(--navy-800); font-size: 11px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
 .industry-table td small { display: block; color: #9aa6ab; font-size: 8px; line-height: 1.4; }
 .industry-table td strong[dir="ltr"] { font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
-.holder-highlight-card { grid-column: 1 / -1; }
+/* Cards 3–5 reuse the industry table look; eight columns scroll sideways only
+   when the card itself is narrower than a readable row. */
+.ranked-card { grid-column: 1 / -1; }
+.ranked-table table { width: 100%; min-width: 660px; table-layout: auto; }
+.ranked-table td { vertical-align: middle; white-space: nowrap; }
+.ranked-table td .rank-symbol { display: block; }
+.rank-symbol-link { color: #1a6a96; font-size: 11px; font-weight: 850; text-decoration: none; }
+.rank-symbol-link:hover { text-decoration: underline; }
+.rank-holder-name { color: #1a6a96; font-size: 10.5px; font-weight: 750; white-space: normal; }
+.ranked-table .weekly-coverage { color: var(--orange); font-weight: 800; }
 .holder-highlight-status { padding: 8px 16px; color: var(--muted); font-size: 12px; }
 .reversal-value small { display: block; margin-top: 5px; }
 /* Auditable divergence analysis */

@@ -26,13 +26,13 @@ test("A: reversal card header and rows have no خرید/فروش حقیقی volu
   assert.ok(!block.includes("فروش حقیقی"), "فروش حقیقی header removed");
   assert.ok(!block.includes("reversal-volume"), "volume cells removed from rows");
   // remaining columns intact
-  for (const label of ["نماد", "آخر (ریال)", "پایانی (ریال)", "اختلاف (%)"]) {
+  for (const label of ["نماد", "آخرین معامله (ریال)", "پایانی (ریال)", "اختلاف (%)", "تاریخ"]) {
     assert.ok(block.includes(label), `column ${label} kept`);
   }
 });
 
-test("A: reversal grid CSS is 4 columns (2 header labels + 3 value columns... symbol+3)", () => {
-  assert.match(cssSource, /reversal-table-head[^}]*grid-template-columns:\s*minmax\(74px, 1\.15fr\) repeat\(3, minmax\(52px, \.78fr\)\)/);
+test("A: reversal grid CSS carries a titled column for the session date too", () => {
+  assert.match(cssSource, /reversal-table-head[^}]*grid-template-columns:\s*minmax\(68px, 1\.05fr\) repeat\(3, minmax\(50px, \.78fr\)\) minmax\(62px, \.82fr\)/);
 });
 
 // ── B. Dates on highlight cards ─────────────────────────────────────────────
@@ -48,7 +48,7 @@ test("B: HighlightCard table has a تاریخ column and per-row date cell", () 
 });
 
 test("B: reversal rows render the session date as a separated node", () => {
-  assert.match(clientSource, /reversal-symbol[\s\S]{0,200}reversal-date\">\{fmtDate\(row\.sessionDate\)\}/);
+  assert.match(clientSource, /<span className="reversal-date">\{fmtDate\(row\.sessionDate\)\}<\/span>/);
 });
 
 // ── C. Copy-safety: dates and badges never selected with the symbol ─────────
@@ -58,9 +58,8 @@ test("C: date chips and badge are user-select:none in CSS", () => {
   assert.ok(cssSource.includes("user-select: none"), "copy-safety rule present");
 });
 
-test("C: symbol stays a clean <strong>{row.symbol}</strong> text node in both views", () => {
+test("C: symbol stays a clean <strong>{row.symbol}</strong> text node in holderIncreases", () => {
   assert.ok(clientSource.includes("<strong>{group.symbol}</strong>"), "holderIncreases single-person symbol node");
-  assert.match(clientSource, /<strong>\{group\.symbol\}<\/strong>\s*\n\s*<span className="holder-people-inline"/, "highlight card: symbol node followed by badge node");
 });
 
 // ── D/E. Badge next to symbol; standalone count column removed ──────────────
@@ -72,13 +71,7 @@ test("D/E: no standalone شخص حقیقی count column remains in holderIncreas
   assert.ok(!table[0].includes("holder-people-badge"), "old detached badge class gone from this view");
 });
 
-test("D/E: highlight card badge sits inside the symbol button next to the symbol", () => {
-  const start = clientSource.indexOf("holder-expand-button");
-  assert.ok(start > 0, "expand button found");
-  const block = clientSource.slice(start, start + 500);
-  assert.ok(block.indexOf("<strong>{group.symbol}</strong>") > -1 && block.indexOf("holder-people-inline") > -1, "symbol and badge colocated");
-  assert.ok(block.indexOf("<strong>{group.symbol}</strong>") < block.indexOf("holder-people-inline"), "symbol before badge, same line");
-});
+
 
 // ── F/G. Expand/collapse UX: single person inline, multi expandable ─────────
 test("F: one-person group opens and closes without losing its record", () => {

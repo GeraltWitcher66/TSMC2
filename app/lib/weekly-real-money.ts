@@ -47,8 +47,22 @@ export function weeklySummary(values: (number | null)[]): {
 }
 
 // ─── Browser cache ──────────────────────────────────────────────────────────
-/** One recorded closed session: the net real-money value in Rial. */
-export type WeeklyCacheEntry = { net: number };
+/**
+ * One recorded closed session. net/buyValue/sellValue are Rial, counts are
+ * people, value is the session's trade value. Older entries only carried net.
+ */
+export type WeeklyCacheEntry = {
+  net: number;
+  value?: number;
+  buyValue?: number;
+  buyCount?: number;
+  sellValue?: number;
+  sellCount?: number;
+};
+const finiteOr = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return value === undefined || value === null || value === "" || !Number.isFinite(parsed) ? undefined : parsed;
+};
 export type WeeklyCache = Record<string, WeeklyCacheEntry>;
 
 const cacheKeyOf = (insCode: string, date: number) => `${insCode}:${date}`;
@@ -61,8 +75,15 @@ export function readWeeklyCache(): WeeklyCache {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const cache: WeeklyCache = {};
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const net = Number((value as WeeklyCacheEntry | null)?.net);
-      if (/^\S+:\d{8}$/.test(key) && Number.isFinite(net)) cache[key] = { net };
+      const entry = value as WeeklyCacheEntry | null;
+      const net = Number(entry?.net);
+      if (!/^\S+:\d{8}$/.test(key) || !Number.isFinite(net)) continue;
+      const stored: WeeklyCacheEntry = { net };
+      for (const field of ["value", "buyValue", "buyCount", "sellValue", "sellCount"] as const) {
+        const parsed = finiteOr(entry?.[field]);
+        if (parsed !== undefined) stored[field] = parsed;
+      }
+      cache[key] = stored;
     }
     return cache;
   } catch { return {}; }
@@ -84,7 +105,7 @@ export function pruneWeeklyCache(cache: WeeklyCache, keep = WEEKLY_CACHE_SESSION
 }
 
 // ─── Official reads ─────────────────────────────────────────────────────────
-export type TradedSession = { date: number; close: number | null; volume: number | null };
+export type TradedSession = { date: number; close: number | null; volume: number | null; value: number | null };
 
 const num = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -115,7 +136,8 @@ export function parseTradedSessions(payload: unknown, limit = WEEKLY_SESSIONS): 
     const close = positive(row, ["pClosing", "pcl", "close"]);
     const volume = positive(row, ["qTotTran5J", "qtj", "volume"]);
     if (close === null || volume === null) continue;
-    byDate.set(date, { date, close, volume });
+    const value = positive(row, ["qTotCap", "qTotCap5J", "value"]) ?? close * volume;
+    byDate.set(date, { date, close, volume, value });
   }
   return [...byDate.values()].sort((a, b) => b.date - a.date).slice(0, Math.max(1, limit));
 }
@@ -130,15 +152,26 @@ async function readTsetmc(path: string, signal: AbortSignal | undefined, request
   return relayed.json();
 }
 
-/** Net real-money value of one closed session, in Rial; null when unpublished and unpriceable. */
-function sessionNet(record: Record<string, unknown>, close: number | null): number | null {
+/** Everything one closed session contributes to the weekly columns; Rial. */
+export type SessionFlow = {
+  net: number | null;
+  value: number | null;
+  buyValue: number | null;
+  buyCount: number | null;
+  sellValue: number | null;
+  sellCount: number | null;
+};
+
+/** Real-money flow of one dated ClientType record; net falls back to volumes × close. */
+export function sessionFlow(record: Record<string, unknown>, close: number | null, tradeValue: number | null): SessionFlow {
   const buyValue = num(record.buy_I_Value);
   const sellValue = num(record.sell_I_Value);
-  if (buyValue !== null && sellValue !== null) return buyValue - sellValue;
   const buyVolume = num(record.buy_I_Volume);
   const sellVolume = num(record.sell_I_Volume);
-  if (buyVolume !== null && sellVolume !== null && close !== null) return (buyVolume - sellVolume) * close;
-  return null;
+  let net: number | null = null;
+  if (buyValue !== null && sellValue !== null) net = buyValue - sellValue;
+  else if (buyVolume !== null && sellVolume !== null && close !== null) net = (buyVolume - sellVolume) * close;
+  return { net, value: tradeValue, buyValue, sellValue, buyCount: num(record.buy_I_Count), sellCount: num(record.sell_I_Count) };
 }
 
 export type WeeklySymbolResult = {
@@ -149,7 +182,18 @@ export type WeeklySymbolResult = {
   coverageLabel: string | null;
   /** Session dates used, newest first. */
   dates: number[];
+  /** Trade value summed over the same sessions (Rial). */
+  value: number;
+  buyValue: number;
+  buyCount: number;
+  sellValue: number;
+  sellCount: number;
+  /** Rial per real buyer / seller over the window; null when a count is missing. */
+  perBuyer: number | null;
+  perSeller: number | null;
 };
+
+const emptyFlow: SessionFlow = { net: null, value: null, buyValue: null, buyCount: null, sellValue: null, sellCount: null };
 
 export type WeeklyLoadOptions = {
   /** Rows of the dominant session — exactly the symbols the daily card ranks. */
@@ -191,42 +235,75 @@ export async function loadWeeklyInflow(options: WeeklyLoadOptions): Promise<Week
     } catch { sessions = []; }
     // The card's own session may be newer than the daily list and is authoritative.
     if (latest && !sessions.some((session) => session.date === latest)) {
-      sessions = [{ date: latest, close: row.priceClose > 0 ? row.priceClose : null, volume: null }, ...sessions]
+      sessions = [{ date: latest, close: row.priceClose > 0 ? row.priceClose : null, volume: null, value: row.value || null }, ...sessions]
         .sort((a, b) => b.date - a.date).slice(0, WEEKLY_SESSIONS);
     }
     sessions = sessions.slice(0, WEEKLY_SESSIONS);
 
     const values: number[] = [];
+    const flows: SessionFlow[] = [];
     const used: number[] = [];
     for (const session of sessions) {
       if (options.signal?.aborted) break;
-      let net: number | null = null;
+      let flow: SessionFlow = { ...emptyFlow, value: session.value };
       const isCardSession = session.date === latest && row.clientTypeDate === latest;
-      if (isCardSession) net = latestNetFromDailyCard(row);
-      if (net === null) {
+      if (isCardSession) {
+        flow = {
+          net: latestNetFromDailyCard(row),
+          value: row.valueAvailable === false ? null : row.value || null,
+          buyValue: row.realBuyValue ?? null,
+          buyCount: row.realBuyCount || null,
+          sellValue: row.realSellValue ?? null,
+          sellCount: row.realSellCount || null,
+        };
+      }
+      if (flow.net === null) {
         const key = cacheKeyOf(row.insCode, session.date);
         const cached = cache[key];
-        if (cached) net = cached.net;
-        else {
+        if (cached) {
+          flow = {
+            net: cached.net,
+            value: cached.value ?? session.value,
+            buyValue: cached.buyValue ?? null,
+            buyCount: cached.buyCount ?? null,
+            sellValue: cached.sellValue ?? null,
+            sellCount: cached.sellCount ?? null,
+          };
+        } else {
           try {
             const typed = parseDatedClientType(
               await readTsetmc(`ClientType/GetClientTypeHistory/${encodeURIComponent(row.insCode)}/${session.date}`, options.signal, request),
               row.insCode, session.date);
             if (typed) {
-              net = sessionNet(typed as Record<string, unknown>, session.close);
-              if (net !== null) cache[key] = { net };
+              flow = sessionFlow(typed as Record<string, unknown>, session.close, session.value);
+              if (flow.net !== null) {
+                const stored: WeeklyCacheEntry = { net: flow.net };
+                for (const field of ["value", "buyValue", "buyCount", "sellValue", "sellCount"] as const) {
+                  const parsed = flow[field];
+                  if (parsed !== null) stored[field] = parsed;
+                }
+                cache[key] = stored;
+              }
             }
           } catch { /* one missing session keeps the symbol with fewer sessions */ }
         }
       }
-      if (net !== null) { values.push(net); used.push(session.date); }
+      if (flow.net !== null) { values.push(flow.net); flows.push(flow); used.push(session.date); }
     }
 
     const summary = weeklySummary(values);
     if (summary.net !== null) {
+      const sumOf = (pick: (flow: SessionFlow) => number | null) => flows.reduce((total, flow) => total + (pick(flow) ?? 0), 0);
+      const buyValue = sumOf((flow) => flow.buyValue);
+      const buyCount = sumOf((flow) => flow.buyCount);
+      const sellValue = sumOf((flow) => flow.sellValue);
+      const sellCount = sumOf((flow) => flow.sellCount);
       results.push({
         symbol: row.symbol, insCode: row.insCode, net: summary.net,
         covered: summary.covered, coverageLabel: summary.coverageLabel, dates: used,
+        value: sumOf((flow) => flow.value), buyValue, buyCount, sellValue, sellCount,
+        perBuyer: buyCount > 0 ? buyValue / buyCount : null,
+        perSeller: sellCount > 0 ? sellValue / sellCount : null,
       });
     }
     done += 1;
