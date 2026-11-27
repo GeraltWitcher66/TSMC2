@@ -41,7 +41,10 @@ test("B: HighlightCard table has a تاریخ column and per-row date cell", () 
   assert.ok(start > 0, "HighlightCard found");
   const card = clientSource.slice(start, start + 2200);
   assert.ok(card.includes("<th>تاریخ</th>"), "تاریخ header added");
-  assert.match(card, /<td><small className="row-date">\{fmtDate\(row\.sessionDate\)\}<\/small><\/td>/);
+  // The cell is still one per-row date small; `rowDate` keeps the single
+  // session date for daily cards and shows the session range on the weekly card.
+  assert.match(card, /<td><small className="row-date">\{rowDate\(row\)\}<\/small><\/td>/);
+  assert.match(card, /const rowDate = \(row: HighlightListRow\) => row\.sessionRange \?\? fmtDate\(row\.sessionDate\)/);
 });
 
 test("B: reversal rows render the session date as a separated node", () => {

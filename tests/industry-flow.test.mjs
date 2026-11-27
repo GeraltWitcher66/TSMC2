@@ -8,6 +8,8 @@ import {
   parseClientTypeAll, parseMarketWatch,
 } from "../app/lib/industry-symbols.ts";
 import { backfillIndustryHistory } from "../app/lib/industry-history.ts";
+import { MARKET_WATCH_PATH, MARKET_WATCH_QUERY } from "../app/lib/market-watch.ts";
+import { fetchTsetmcViaHosts } from "../app/api/tsetmc-relay/route.ts";
 
 const quote = (insCode, symbol, name, sectorCode, close, prevClose, value) => ({
   insCode, lva: symbol, lvc: name, csv: sectorCode,
@@ -41,6 +43,34 @@ test("fund rows are split by fund type in the requested order", () => {
   assert.equal(fundKind("ص.س.اهرمی موج فیروزه-س", "موج"), "صندوق اهرمی");
   // Order matters: a leveraged fund whose name also mentions gold stays leveraged.
   assert.equal(fundKind("صندوق اهرمی طلا"), "صندوق اهرمی");
+});
+
+test("the direct read and the relay ask GetMarketWatch for the same standard query", async () => {
+  // Live check: with showTraded=false the feed answered 3753 rows; the relay's
+  // older showTraded=true answered 2339 and lost sector codes 35, 50 and 71.
+  assert.equal(MARKET_WATCH_QUERY, MARKET_WATCH_PATH.split("?")[1]);
+  for (const part of ["market=0", "industrialGroup=", "showTraded=false", "withBestLimits=false", "hEven=0", "RefID=0"]) {
+    assert.ok(MARKET_WATCH_QUERY.split("&").includes(part), `${part} is sent`);
+  }
+  for (let index = 0; index < 9; index += 1) {
+    assert.ok(MARKET_WATCH_QUERY.includes(`paperTypes%5B${index}%5D=${index + 1}`), `paperTypes[${index}] is sent encoded`);
+  }
+  assert.ok(!/[\[\]]/.test(MARKET_WATCH_QUERY), "brackets stay percent-encoded");
+
+  const requested = [];
+  const request = async (url) => {
+    requested.push(String(url));
+    return new Response(JSON.stringify({ marketwatch: [{ insCode: "1", lva: "فولاد", csv: "27 " }] }), {
+      status: 200, headers: { "content-type": "application/json" },
+    });
+  };
+  const body = await fetchTsetmcViaHosts("ClosingPrice/GetMarketWatch", undefined, undefined, request);
+  assert.ok(body, "the relay returns the upstream body instead of a 502");
+  assert.equal(JSON.parse(body).marketwatch.length, 1);
+  assert.equal(requested.length, 1, "the first working official host answers");
+  assert.ok(requested[0].includes(`?${MARKET_WATCH_QUERY}`), "the relay appends the shared query");
+  assert.ok(requested[0].startsWith("https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?") ||
+    requested[0].startsWith("https://tsetmc.com/api/ClosingPrice/GetMarketWatch?"), requested[0]);
 });
 
 test("market watch and client type payloads are parsed into symbol rows", () => {

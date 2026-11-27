@@ -37,6 +37,8 @@ import {
   FUND_KINDS, parseClientTypeAll, parseMarketWatch, type MarketQuote,
 } from "./lib/industry-symbols";
 import { backfillIndustryHistory, type BackfillProgress, type HistorySymbol } from "./lib/industry-history";
+import { MARKET_WATCH_PATH } from "./lib/market-watch";
+import { loadWeeklyInflow, rankWeeklyInflow, type WeeklySymbolResult } from "./lib/weekly-real-money";
 import {
   closingPriceGap,
   isSellQueueToPositive,
@@ -75,7 +77,7 @@ type HolderIncreaseRow = {
   ownership?: OwnershipValidation;
 };
 type ActionView = { row: ScreenerRow; actions: CorporateAction[]; period: Period };
-type HighlightListRow = MarketHighlight & { primary: string; secondary: string; tag?: string };
+type HighlightListRow = MarketHighlight & { primary: string; secondary: string; tag?: string; sessionRange?: string; coverageLabel?: string | null };
 
 type HolderChangeSummary = MajorIndividualHoldingSummary;
 type HolderScope = WatchlistScope | "market";
@@ -288,23 +290,27 @@ function HolderChangeCell({ summary, loading, meta }: { summary?: HolderChangeSu
   </div>;
 }
 
-function HighlightCard({ number, title, subtitle, icon, rows, emptyText }: {
+function HighlightCard({ number, title, subtitle, icon, rows, emptyText, progress }: {
   number: string;
   title: string;
   subtitle: string;
   icon: string;
   rows: HighlightListRow[];
   emptyText: string;
+  /** Background work this card is still doing; the other cards never wait for it. */
+  progress?: string;
 }) {
+  const rowDate = (row: HighlightListRow) => row.sessionRange ?? fmtDate(row.sessionDate);
   return <article className="highlight-card">
     <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">{icon}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div><span className="highlight-number">{number}</span></header>
+    {progress && <p className="industry-progress" role="status">{progress}</p>}
     <div className="table-wrap highlight-table"><table aria-label={title}><thead><tr><th>نماد</th><th>{title.includes("ارزش معاملات") ? "ارزش" : title.includes("حجم معاملات") ? "حجم" : "ورود پول حقیقی"}</th><th>آخرین معامله (ریال)</th><th>پایانی (ریال)</th><th title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</th><th>تاریخ</th></tr></thead><tbody>{rows.map((row) => <tr key={row.symbol}>
-      <td><span className="symbol-date-line"><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="row-date" aria-label={`تاریخ داده ${fmtDate(row.sessionDate)}`}>{fmtDate(row.sessionDate)}</small></span><small>{row.name}</small></td>
-      <td><strong>{row.primary}</strong></td>
+      <td><span className="symbol-date-line"><strong>{row.symbol}</strong><CopySymbol symbol={row.symbol} /><small className="row-date" aria-label={`تاریخ داده ${rowDate(row)}`}>{rowDate(row)}</small></span><small>{row.name}</small></td>
+      <td><strong>{row.primary}</strong>{row.coverageLabel && <small className="weekly-coverage">{row.coverageLabel}</small>}</td>
       <td><strong>{fp(row.priceLast)}</strong><small className={row.lastChangePct >= 0 ? "positive" : "negative"}>{pct(row.lastChangePct)}</small></td>
       <td><strong>{fp(row.priceClose)}</strong><small className={row.closeChangePct >= 0 ? "positive" : "negative"}>{pct(row.closeChangePct)}</small></td>
       <td><strong className={row.priceLast >= row.priceClose ? "positive" : "negative"}>{pct(closingPriceGap(row.priceLast, row.priceClose)?.percent)}</strong><small>{fp(closingPriceGap(row.priceLast, row.priceClose)?.rial)} ریال</small></td>
-      <td><small className="row-date">{fmtDate(row.sessionDate)}</small></td>
+      <td><small className="row-date">{rowDate(row)}</small></td>
     </tr>)}</tbody></table></div>
     {!rows.length && <div className="highlight-empty">{emptyText}</div>}
   </article>;
@@ -312,7 +318,7 @@ function HighlightCard({ number, title, subtitle, icon, rows, emptyText }: {
 
 function ReversalHighlightCard({ rows, emptyText }: { rows: MarketHighlight[]; emptyText: string }) {
   return <article className="highlight-card reversal-highlight-card">
-    <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۶</span></header>
+    <header>      <div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↺</span><div><h3>از صف فروش به مثبت</h3><p>لمس دقیق کف مجاز همان روز، آخرین مثبت و پایانی منفی</p></div></div><span className="highlight-number">۷</span></header>
     <div className="reversal-table-head" aria-hidden="true">
       <span>نماد</span><span>آخر (ریال)</span><span>پایانی (ریال)</span><span title="اختلاف آخرین معامله نسبت به قیمت پایانی همان روز: (آخرین معامله − پایانی) ÷ پایانی × ۱۰۰">اختلاف (%)</span>
     </div>
@@ -498,6 +504,10 @@ export default function ScreenerClient() {
   const [highlightHoldings, setHighlightHoldings] = useState<HoldingPage | null>(null);
   const [highlightHoldingsLoading, setHighlightHoldingsLoading] = useState(false);
   const [highlightHoldingsError, setHighlightHoldingsError] = useState("");
+  // Weekly real-money inflow is loaded independently so no other card waits.
+  const [weeklyMoney, setWeeklyMoney] = useState<WeeklySymbolResult[]>([]);
+  const [weeklyProgress, setWeeklyProgress] = useState<{ done: number; total: number } | null>(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [holderSortCol, setHolderSortCol] = useState("realHolders");
   const [holderSortDir, setHolderSortDir] = useState<SortDirection>("desc");
   const [marketSearch, setMarketSearch] = useState("");
@@ -562,6 +572,9 @@ export default function ScreenerClient() {
   const holderScanToken = useRef(0);
   const manualController = useRef<AbortController | null>(null);
   const highlightController = useRef<AbortController | null>(null);
+  const weeklyController = useRef<AbortController | null>(null);
+  const weeklyRequest = useRef(0);
+  const weeklyScopeKey = useRef("");
   const increaseController = useRef<AbortController | null>(null);
   const holderChangeRequest = useRef(0);
   const holderSymbolRequests = useRef<Record<string, number>>({});
@@ -1029,11 +1042,9 @@ export default function ScreenerClient() {
   }
 
   // The watch endpoint can answer empty without its standard query, so the
-  // whole-market request always carries every paper type.
-  const marketWatchPath = "ClosingPrice/GetMarketWatch?" + [
-    "market=0", "industrialGroup=", "showTraded=false", "withBestLimits=false", "hEven=0", "RefID=0",
-    ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => `paperTypes%5B${index}%5D=${index + 1}`),
-  ].join("&");
+  // whole-market request always carries every paper type. The relay sends the
+  // very same query, so both transports return the same rows.
+  const marketWatchPath = MARKET_WATCH_PATH;
 
   /** Official TSETMC read: direct CDN when reachable, else the same-origin relay. */
   async function readTsetmc(path: string): Promise<unknown> {
@@ -1850,6 +1861,72 @@ export default function ScreenerClient() {
     void loadIndustries();
   }, [activeTab]);
 
+  // Five-session real-money card: same symbols as the daily card (the dominant
+  // session rows of the current scope). Runs beside the other cards, streams its
+  // own progress, and never blocks them.
+  useEffect(() => {
+    if (activeTab !== "highlights") {
+      weeklyController.current?.abort();
+      weeklyController.current = null;
+      weeklyScopeKey.current = "";
+      return;
+    }
+    // Wait until the ranking has settled: highlights stream in batches, and
+    // restarting on every batch would abort the load over and over.
+    if (highlightsLoading) return;
+    const latest = highlightGroups.sessionDate;
+    const base = latest ? highlights.filter((row) => row.sessionDate === latest && row.insCode) : [];
+    if (!latest || !base.length) {
+      setWeeklyMoney([]);
+      setWeeklyProgress(null);
+      return;
+    }
+    const key = `${highlightScope}|${latest}|${base.length}`;
+    if (weeklyScopeKey.current === key) return;
+    weeklyScopeKey.current = key;
+    const requestId = ++weeklyRequest.current;
+    weeklyController.current?.abort();
+    const controller = new AbortController();
+    weeklyController.current = controller;
+    setWeeklyLoading(true);
+    setWeeklyMoney([]);
+    setWeeklyProgress({ done: 0, total: base.length });
+    void (async () => {
+      try {
+        const rows = await loadWeeklyInflow({
+          rows: base,
+          signal: controller.signal,
+          onUpdate: (partial, done, total) => {
+            if (weeklyRequest.current !== requestId) return;
+            setWeeklyMoney(partial);
+            setWeeklyProgress({ done, total });
+          },
+        });
+        if (weeklyRequest.current === requestId) setWeeklyMoney(rows);
+      } catch { /* the card keeps whatever sessions already arrived */ }
+      finally { if (weeklyRequest.current === requestId) setWeeklyLoading(false); }
+    })();
+  }, [activeTab, highlights, highlightsLoading, highlightGroups.sessionDate, highlightScope]);
+
+  const weeklyRows = useMemo<HighlightListRow[]>(() => {
+    const bySymbol = new Map(highlights
+      .filter((row) => row.sessionDate === highlightGroups.sessionDate)
+      .map((row) => [row.symbol, row]));
+    return rankWeeklyInflow(weeklyMoney, 10).flatMap((entry) => {
+      const row = bySymbol.get(entry.symbol);
+      if (!row) return [];
+      const oldest = entry.dates[entry.dates.length - 1];
+      const newest = entry.dates[0];
+      return [{
+        ...row,
+        primary: `${faCompact.format(entry.net)} ریال`,
+        secondary: entry.coverageLabel ?? `جمع ${faI.format(entry.covered)} جلسه`,
+        sessionRange: oldest && newest && oldest !== newest ? `${fmtDate(oldest)} تا ${fmtDate(newest)}` : fmtDate(newest ?? row.sessionDate),
+        coverageLabel: entry.coverageLabel,
+      }];
+    });
+  }, [weeklyMoney, highlights, highlightGroups.sessionDate]);
+
   // Holders grouped by SYMBOL for the card: one parent row per symbol with
   // every real-person record preserved as a separate child (client spec:
   // each person shown vertically underneath, never aggregated/deduplicated).
@@ -1909,7 +1986,7 @@ export default function ScreenerClient() {
       {highlightsError && <p className="scan-error" role="alert">{highlightsError}{highlights.length ? "؛ آخرین نتیجه همین فهرست نمایش داده می‌شود." : "؛ اسکن کامل نشده است."}</p>}
       <div className="highlights-intro">
         <div className="highlights-intro-line"><strong>فقط نمادهای فهرست خودمان</strong><span className="session-date-badge">تاریخ داده: <b>{shownSessionDate ? fmtDate(shownSessionDate) : highlights.length ? "تاریخ منبع نامشخص" : "در انتظار دریافت"}</b></span></div>
-        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ چهار کارت بعدی ۱۰ نماد برتر را نشان می‌دهند؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
+        <p>این رتبه‌ها از نمادهای فهرست فعال ساخته می‌شوند و به جدول‌های ۹۰/۱۸۰ روزه یا حقیقی‌های عمده چیزی اضافه نمی‌کنند. دو کارت اول ورود پول حقیقی، ارزش معاملات و قدرت خرید را از داده هر نماد به تفکیک صنعت (روزانه و جمع ۳ جلسه آخر) می‌سازند و ۱۵ صنعت اول را مرتب می‌کنند؛ پنج کارت بعدی ۱۰ نماد برتر را نشان می‌دهند (ورود پول حقیقی روزانه و هفتگی، ارزش و حجم معاملات و بازگشت از صف فروش)؛ در کارت تغییرات سهامداران، ۲۰ نماد اول و در صورت درخواست، همه نتایج دریافت‌شده قابل مشاهده است.</p>
         {priceIncomplete && <p className="partial-data-note">پوشش قیمت، حجم یا ارزش معاملات کامل نیست؛ رتبه‌بندی فقط از داده‌های تاریخ‌دار معتبر و کش مشخص ساخته شده است.</p>}
         {datedSessions.size > 1 && <p className="partial-data-note">داده‌ها مربوط به چند جلسه معاملاتی‌اند. برای جلوگیری از ترکیب جلسه‌ها، کارت‌های روزانه فقط {faI.format(highlightGroups.rankedSymbols)} نماد مربوط به جلسه غالب {fmtDate(shownSessionDate)} را رتبه‌بندی می‌کنند.</p>}
         {noTradeTodayRows.length > 0 && <p className="partial-data-note"><b>بدون معامله امروز:</b> {noTradeTodayRows.slice(0, 15).map((row) => row.symbol).join("، ")}{noTradeTodayRows.length > 15 ? ` و ${faI.format(noTradeTodayRows.length - 15)} نماد دیگر` : ""}؛ قیمت آخرین جلسه معاملاتی این نمادها نگه داشته شد و در رتبه‌بندی امروز شرکت داده نشد.</p>}
@@ -1923,11 +2000,12 @@ export default function ScreenerClient() {
         <IndustryFlowCard number="۱" title="ورود پول به صنعت روزانه" subtitle="جمع کل بازار به تفکیک صنعت: ورود پول حقیقی، ارزش معاملات و قدرت خرید" rows={topIndustries} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} emptyText="جمع ورود پول صنعت‌ها از منبع داده در دسترس نیست." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <IndustryFlowCard number="۲" title={industrySessions >= 3 ? "ورود پول به صنعت (۳ روزه)" : `ورود پول به صنعت (جمع ${faI.format(industrySessions)} جلسه)`} subtitle={industrySessions >= 3 ? "جمع ۳ جلسه آخر معاملاتی به تفکیک صنعت" : "۳ جلسه کامل نشده؛ ارقام جمع جلسه‌های ثبت‌شده است"} sessions={industrySessions} rows={topIndustriesThreeDay} loading={industriesLoading} error={industriesError} fetchedAt={industriesFetchedAt} note={industryNote} progress={backfillProgress} emptyText="برای جمع چندروزه، دست‌کم داده یک جلسه لازم است." onRetry={() => { industriesRequested.current = true; void loadIndustries(); }} />
         <HighlightCard number="۳" title="بیشترین ورود پول حقیقی روزانه" subtitle="خالص ارزش خرید حقیقی آخرین جلسه" icon="↗" rows={highlightGroups.realMoney} emptyText={emptyDataMessage("money", coverage.realValues, coverage.requested)} />
-        <HighlightCard number="۴" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
-        <HighlightCard number="۵" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
+        <HighlightCard number="۴" title="بیشترین ورود پول حقیقی هفتگی" subtitle="جمع خالص ارزش خرید حقیقی ۵ جلسه آخر" icon="↗" rows={weeklyRows} progress={weeklyProgress ? `دریافت تاریخچه: ${faI.format(weeklyProgress.done)} از ${faI.format(weeklyProgress.total)} نماد${weeklyLoading ? "…" : ""}` : undefined} emptyText={weeklyLoading ? "در حال ساخت جمع ۵ جلسه آخر…" : "داده کافی برای جمع ۵ جلسه آخر در دسترس نیست."} />
+        <HighlightCard number="۵" title="بیشترین ارزش معاملات" subtitle="ارزش ریالی معاملات آخرین جلسه" icon="◆" rows={highlightGroups.values} emptyText="داده ارزش معاملات برای این فهرست موجود نیست." />
+        <HighlightCard number="۶" title="بیشترین حجم معاملات" subtitle="تعداد سهام معامله‌شده در آخرین جلسه" icon="▥" rows={highlightGroups.volumes} emptyText="داده حجم معاملات برای این فهرست موجود نیست." />
         <ReversalHighlightCard rows={highlightGroups.reversals} emptyText={emptyDataMessage("floor", coverage.floor, coverage.requested)} />
         <article className="highlight-card holder-highlight-card">
-          <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↗</span><div><h3>تغییرات سهامدار حقیقی</h3><p>هر ردیف یک سهامدار عمده حقیقی با افزایش سهم</p></div></div><span className="highlight-number">۷</span></header>
+          <header><div className="highlight-heading"><span className="highlight-icon" aria-hidden="true">↗</span><div><h3>تغییرات سهامدار حقیقی</h3><p>هر ردیف یک سهامدار عمده حقیقی با افزایش سهم</p></div></div><span className="highlight-number">۸</span></header>
           <p className="holder-highlight-status">{highlightHoldingsLoading ? "در حال دریافت… " : ""}تاریخ تغییرات: {fmtDate(highlightHoldings?.sourceDate)}{highlightHoldings?.fallback ? " · داده پشتیبان" : ""}{highlightHoldings?.partial ? " · اسکن ناقص" : ""}{highlightHoldings?.fetchedAt ? ` · ${highlightHoldings.fallback ? "زمان ثبت نسخه پشتیبان" : "زمان دریافت"}: ${faDT.format(new Date(highlightHoldings.fetchedAt))}` : ""}</p>
           {!highlightHoldingsLoading && highlightHoldings?.partial && highlightHoldings.rows.length > 0 && <p className="partial-data-note">فعلاً {faI.format(groupHolderRowsBySymbol(highlightHoldings.rows).length)} نماد دارای افزایش تأییدشده دریافت شده است. چون دریافت ناقص بوده، این عدد تعداد کل افزایش‌ها در فهرست نیست.</p>}
           {highlightHoldings?.partial && highlightHoldings.warning && <p className="partial-data-note">{highlightHoldings.warning}</p>}
